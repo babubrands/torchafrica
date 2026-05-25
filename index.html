@@ -25,6 +25,9 @@
             <li class="nav-item"><a class="nav-link" href="#work">Our Work</a></li>
             <li class="nav-item"><a class="nav-link" href="#memorandum">Memorandum</a></li>
             <li class="nav-item"><a class="nav-link" href="#blog">Blog</a></li>
+            <li class="nav-item"><a class="nav-link" href="studio.html">My Studio</a></li>
+            <li class="nav-item"><a class="nav-link" href="admin.html">Admin</a></li>
+            <li class="nav-item auth-slot" id="authSlot"></li>
             <li class="nav-item"><a class="btn btn-sm btn-torch ms-lg-2" href="#contact">Partner With Us</a></li>
           </ul>
         </div>
@@ -152,7 +155,7 @@
               <p class="eyebrow">Community Blog</p>
               <h2>Updates, documents, photos, and civic conversations.</h2>
             </div>
-            <button class="btn btn-torch" type="button" data-bs-toggle="modal" data-bs-target="#postModal">Create Post</button>
+            <button class="btn btn-torch" id="createPostButton" type="button" data-bs-toggle="modal" data-bs-target="#postModal">Create Post</button>
           </div>
 
           <div id="configNotice" class="alert alert-warning d-none" role="alert">
@@ -247,7 +250,7 @@
               <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label" for="postAuthor">Author</label>
-                  <input class="form-control" id="postAuthor" type="text" required placeholder="Torch Africa">
+                  <input class="form-control" id="postAuthor" type="text" required placeholder="Your name">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label" for="postCategory">Category</label>
