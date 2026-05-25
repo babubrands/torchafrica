@@ -73,7 +73,31 @@ const configNotice = document.getElementById("configNotice");
 const authSlot = document.getElementById("authSlot");
 const createPostButton = document.getElementById("createPostButton");
 const year = document.getElementById("year");
+const contactForm = document.getElementById("contactForm");
 if (year) year.textContent = new Date().getFullYear();
+
+if (contactForm) {
+  contactForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+
+    const name = document.getElementById("contactName").value.trim();
+    const email = document.getElementById("contactEmail").value.trim();
+    const message = document.getElementById("contactMessage").value.trim();
+
+    if (!name || !email || !message) return;
+
+    const whatsappMessage = [
+      "Hello Torch Africa,",
+      "",
+      `My name is ${name}.`,
+      `Email: ${email}`,
+      "",
+      message
+    ].join("\n");
+
+    window.open(`https://wa.me/254733296064?text=${encodeURIComponent(whatsappMessage)}`, "_blank", "noopener");
+  });
+}
 
 function isSupabaseConfigured() {
   return SUPABASE_URL.startsWith("https://") && SUPABASE_ANON_KEY.length > 20 && window.supabase;
