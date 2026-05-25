@@ -265,7 +265,13 @@ h3 {
   padding: 1rem 1.25rem;
 }
 
-.like-btn {
+.engagement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.engagement-btn {
   align-items: center;
   background: var(--torch-soft);
   border: 1px solid var(--torch-line);
@@ -277,11 +283,52 @@ h3 {
   padding: .5rem .75rem;
 }
 
-.like-btn:hover,
-.like-btn.liked {
+.engagement-btn:hover,
+.engagement-btn:focus {
   background: var(--torch-red);
   border-color: var(--torch-red);
   color: var(--torch-white);
+}
+
+.comments-panel {
+  border-top: 1px solid var(--torch-line);
+  display: none;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.comments-panel.is-open {
+  display: block;
+}
+
+.comment-list {
+  display: grid;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+
+.comment-item {
+  background: #faf8f2;
+  border: 1px solid var(--torch-line);
+  border-radius: 6px;
+  padding: .8rem;
+}
+
+.comment-item strong {
+  color: var(--torch-red);
+  display: block;
+  font-size: .9rem;
+  margin-bottom: .2rem;
+}
+
+.comment-item p,
+.comment-empty {
+  color: var(--torch-muted);
+  margin-bottom: 0;
+}
+
+.comment-form {
+  display: grid;
+  gap: .65rem;
 }
 
 .document-link {
