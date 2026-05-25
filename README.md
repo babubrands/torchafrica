@@ -256,19 +256,31 @@ on public.comments for delete
 using (auth.uid() = user_id or public.is_approved_admin());
 ```
 
-Create a public storage bucket named `post-uploads`, then add these storage policies:
+Create a public storage bucket named `post-uploads`, then add these storage policies. The frontend uploads files under `images/<user-id>/...` and `documents/<user-id>/...`, so authenticated members need insert access to this bucket.
 
 ```sql
+insert into storage.buckets (id, name, public)
+values ('post-uploads', 'post-uploads', true)
+on conflict (id) do update set public = true;
+
 drop policy if exists "Anyone can view uploaded files" on storage.objects;
 drop policy if exists "Anyone can upload files" on storage.objects;
+drop policy if exists "Authenticated members can upload post files" on storage.objects;
+drop policy if exists "Owners and admins can delete uploaded files" on storage.objects;
 
 create policy "Anyone can view uploaded files"
 on storage.objects for select
 using (bucket_id = 'post-uploads');
 
-create policy "Anyone can upload files"
+create policy "Authenticated members can upload post files"
 on storage.objects for insert
-with check (bucket_id = 'post-uploads' and auth.role() = 'authenticated');
+to authenticated
+with check (bucket_id = 'post-uploads');
+
+create policy "Owners and admins can delete uploaded files"
+on storage.objects for delete
+to authenticated
+using (bucket_id = 'post-uploads' and public.is_approved_admin());
 ```
 
 The current setup uses direct email/password sign-up and login. Members can create and delete their own posts/comments after signing in once, and the browser keeps their session for future visits until they sign out. Approved admins can moderate all content. The owner account `ebarasa203@gmail.com` can approve future admin requests.

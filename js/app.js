@@ -54,6 +54,19 @@ let currentUser = null;
 let currentAdmin = null;
 let afterAuthSuccess = null;
 
+function withTimeout(promise, message, timeoutMs = 20000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    })
+  ]);
+}
+
+function getAuthRedirectUrl() {
+  return window.location.href.split("#")[0].split("?")[0];
+}
+
 const feed = document.getElementById("feed");
 const postForm = document.getElementById("postForm");
 const configNotice = document.getElementById("configNotice");
@@ -279,7 +292,8 @@ async function showSignUpModal() {
         email,
         password,
         options: {
-          data: { full_name: name }
+          data: { full_name: name },
+          emailRedirectTo: getAuthRedirectUrl()
         }
       });
 
@@ -513,8 +527,11 @@ async function uploadFile(file, folder) {
   const safeName = file.name.replace(/[^a-z0-9.\-_]/gi, "-").toLowerCase();
   const userFolder = currentUser?.id || "public";
   const path = `${folder}/${userFolder}/${Date.now()}-${safeName}`;
-  const { error } = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file);
-  if (error) throw error;
+  const { error } = await withTimeout(
+    supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file),
+    "Upload timed out. Check the post-uploads bucket and Storage policies."
+  );
+  if (error) throw new Error(error.message || "Upload failed. Check the post-uploads bucket policies.");
 
   const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
   return data.publicUrl;
@@ -568,8 +585,11 @@ if (postForm) {
 
       if (supabaseClient) {
         const { comments, ...postPayload } = newPost;
-        const { error } = await supabaseClient.from(POSTS_TABLE).insert(postPayload);
-        if (error) throw error;
+        const { error } = await withTimeout(
+          supabaseClient.from(POSTS_TABLE).insert(postPayload),
+          "Publishing timed out. Check the posts table insert policy."
+        );
+        if (error) throw new Error(error.message || "Publishing failed. Check the posts table policy.");
         await loadPosts();
       } else {
         newPost.id = `local-${Date.now()}`;
@@ -582,7 +602,7 @@ if (postForm) {
       bootstrap.Modal.getInstance(document.getElementById("postModal")).hide();
     } catch (error) {
       console.error(error);
-      alert("The post could not be published. Please check the console or Supabase settings.");
+      alert(`The post could not be published: ${error.message || "Please check Supabase settings."}`);
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = "Publish";
