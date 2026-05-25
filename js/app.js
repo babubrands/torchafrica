@@ -95,7 +95,14 @@ if (contactForm) {
       message
     ].join("\n");
 
-    window.open(`https://wa.me/254733296064?text=${encodeURIComponent(whatsappMessage)}`, "_blank", "noopener");
+    const encodedMessage = encodeURIComponent(whatsappMessage);
+    const webUrl = `https://wa.me/254733296064?text=${encodedMessage}`;
+    const appUrl = `whatsapp://send?phone=254733296064&text=${encodedMessage}`;
+    const feedback = document.getElementById("contactFeedback");
+
+    window.location.href = appUrl;
+    setTimeout(() => window.open(webUrl, "_blank", "noopener"), 700);
+    if (feedback) feedback.textContent = "Message prepared in WhatsApp. Tap send there to share it.";
   });
 }
 
