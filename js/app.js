@@ -1,5 +1,5 @@
 const SUPABASE_URL = "https://bphqkifxlfsnecovxqkr.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwaHFraWZ4bGZzbmVjb3Z4cWtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2ODM0MTksImV4cCI6MjA5NTI1OTQxOX0.p_uT2TpHN3kbJUhy4vBkteAk7M8BZGdaFYyQPqJXMds";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwaHFraWZ4bGZzbmVjb3Z4cWtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2ODM0MTksImV4cCI6MjA5NTI1OTQxOX0.p_uT2[...]
 const POSTS_TABLE = "posts";
 const COMMENTS_TABLE = "comments";
 const ADMINS_TABLE = "admins";
@@ -150,7 +150,7 @@ function renderAuthSlot() {
   }
 
   if (!currentUser) {
-    authSlot.innerHTML = '<button class="btn btn-sm btn-outline-dark ms-lg-2" type="button" data-auth-action="signin">Sign in with Google</button>';
+    authSlot.innerHTML = '<button class="btn btn-sm btn-outline-dark ms-lg-2" type="button" data-auth-action="signin">Sign in with Email</button>';
     return;
   }
 
@@ -166,16 +166,84 @@ document.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-auth-action]")?.dataset.authAction;
   if (!action) return;
 
-  if (action === "signin") await signInWithGoogle();
+  if (action === "signin") await showMagicLinkModal();
   if (action === "signout") await signOut();
 });
 
-async function signInWithGoogle() {
+async function showMagicLinkModal() {
   if (!supabaseClient) return;
-  await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: window.location.href.split("#")[0] }
+
+  const modalHtml = `
+    <div class="modal fade" id="magicLinkModal" tabindex="-1" aria-labelledby="magicLinkLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="magicLinkLabel">Sign in with Magic Link</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form id="magicLinkForm">
+            <div class="modal-body">
+              <p>Enter your email to receive a sign-in link. Check your inbox and click the link to continue.</p>
+              <label class="form-label" for="magicLinkEmail">Email address</label>
+              <input class="form-control" id="magicLinkEmail" type="email" placeholder="you@example.com" required>
+              <div id="magicLinkMessage" class="mt-3"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-torch">Send Magic Link</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Remove existing modal if present
+  const existing = document.getElementById("magicLinkModal");
+  if (existing) existing.remove();
+
+  // Add modal to page
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  
+  const modal = new bootstrap.Modal(document.getElementById("magicLinkModal"));
+  const form = document.getElementById("magicLinkForm");
+  const emailInput = document.getElementById("magicLinkEmail");
+  const messageDiv = document.getElementById("magicLinkMessage");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = emailInput.value.trim();
+    
+    if (!email) return;
+
+    const submitButton = form.querySelector("button[type='submit']");
+    submitButton.disabled = true;
+    submitButton.textContent = "Sending...";
+    messageDiv.innerHTML = "";
+
+    try {
+      const { error } = await supabaseClient.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}${window.location.pathname}`
+        }
+      });
+
+      if (error) throw error;
+
+      messageDiv.innerHTML = `<div class="alert alert-success">Check your email for a sign-in link!</div>`;
+      emailInput.value = "";
+      setTimeout(() => modal.hide(), 2000);
+    } catch (error) {
+      console.error(error);
+      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Send Magic Link";
+    }
   });
+
+  modal.show();
 }
 
 async function signOut() {
@@ -210,7 +278,7 @@ async function loadPosts() {
   if (error) {
     console.error(error);
     if (configNotice) {
-      configNotice.textContent = "Supabase could not load posts. Check tables, policies, and Google Auth setup.";
+      configNotice.textContent = "Supabase could not load posts. Check tables, policies, and email auth setup.";
       configNotice.classList.remove("d-none");
     }
     posts = getLocalPosts();
@@ -326,7 +394,7 @@ if (createPostButton) {
     if (supabaseClient && !currentUser) {
       event.preventDefault();
       event.stopPropagation();
-      await signInWithGoogle();
+      await showMagicLinkModal();
     }
   });
 }
@@ -336,7 +404,7 @@ if (postForm) {
     event.preventDefault();
 
     if (supabaseClient && !currentUser) {
-      await signInWithGoogle();
+      await showMagicLinkModal();
       return;
     }
 
@@ -431,7 +499,7 @@ if (feed) {
     event.preventDefault();
 
     if (supabaseClient && !currentUser) {
-      await signInWithGoogle();
+      await showMagicLinkModal();
       return;
     }
 
@@ -481,7 +549,7 @@ if (feed) {
 
 async function incrementPostCounter(postId, field) {
   if (supabaseClient && !currentUser) {
-    await signInWithGoogle();
+    await showMagicLinkModal();
     return;
   }
 
@@ -550,7 +618,7 @@ async function deleteCommentById(commentId) {
 
 async function requestAdminAccess() {
   if (!currentUser) {
-    await signInWithGoogle();
+    await showMagicLinkModal();
     return;
   }
 
@@ -584,8 +652,8 @@ async function loadStudio() {
     gate.innerHTML = `
       <div class="dashboard-card">
         <h2>Sign in to view your studio</h2>
-        <p>Use Google to see your posts, engagement, and admin access status.</p>
-        <button class="btn btn-torch" type="button" data-auth-action="signin">Sign in with Google</button>
+        <p>Use email sign-in to see your posts, engagement, and admin access status.</p>
+        <button class="btn btn-torch" type="button" data-auth-action="signin">Sign in with Email</button>
       </div>
     `;
     content.classList.add("d-none");
@@ -651,8 +719,8 @@ async function loadAdminDashboard() {
     gate.innerHTML = `
       <div class="dashboard-card">
         <h2>Admin sign in required</h2>
-        <p>Use Google to continue to the Torch Africa dashboard.</p>
-        <button class="btn btn-torch" type="button" data-auth-action="signin">Sign in with Google</button>
+        <p>Use email sign-in to continue to the Torch Africa dashboard.</p>
+        <button class="btn btn-torch" type="button" data-auth-action="signin">Sign in with Email</button>
       </div>
     `;
     content.classList.add("d-none");
