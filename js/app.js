@@ -289,7 +289,11 @@ async function showSignUpModal() {
         currentUser = data.session.user;
         await finishAuthFlow(modal, messageDiv, "Account created. You are signed in on this device.");
       } else {
-        messageDiv.innerHTML = `<div class="alert alert-warning">Account created. If email confirmation is enabled in Supabase, check your email once before logging in.</div>`;
+        messageDiv.innerHTML = `<div class="alert alert-success">Account created. Log in with the email and password you just used.</div>`;
+        setTimeout(() => {
+          modal.hide();
+          showLoginModal();
+        }, 900);
       }
     } catch (error) {
       console.error(error);
