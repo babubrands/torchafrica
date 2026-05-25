@@ -190,15 +190,15 @@ function renderAuthSlot() {
   if (!authSlot) return;
 
   if (!supabaseClient) {
-    authSlot.innerHTML = '<button class="btn btn-sm btn-outline-dark ms-lg-2" type="button" disabled>Demo Mode</button>';
+    authSlot.innerHTML = '<button class="btn btn-sm btn-outline-dark ms-xl-2" type="button" disabled>Demo Mode</button>';
     return;
   }
 
   if (!currentUser) {
     authSlot.innerHTML = `
-      <div class="btn-group btn-group-sm" role="group">
-        <button type="button" class="btn btn-outline-dark" data-auth-action="signup">Sign Up</button>
-        <button type="button" class="btn btn-outline-dark" data-auth-action="login">Log In</button>
+      <div class="auth-actions" aria-label="Account actions">
+        <button type="button" class="auth-primary" data-auth-action="signup">Sign Up</button>
+        <button type="button" class="auth-secondary" data-auth-action="login">Log In</button>
       </div>
     `;
     return;
