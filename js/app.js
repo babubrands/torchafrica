@@ -109,11 +109,22 @@ async function syncSignedInUser() {
   };
 
   await supabaseClient.from("profiles").upsert(profile).select().maybeSingle();
+
+  // Owner setup - set password on first login
+  if (currentUser.email === OWNER_EMAIL && !currentUser.user_metadata?.password_set) {
+    await showOwnerPasswordSetupModal();
+  }
 }
 
 async function loadAdminStatus() {
   currentAdmin = null;
   if (!supabaseClient || !currentUser?.email) return;
+
+  // Owner has automatic access
+  if (currentUser.email === OWNER_EMAIL) {
+    currentAdmin = { email: currentUser.email, role: "owner", status: "approved" };
+    return;
+  }
 
   const { data, error } = await supabaseClient
     .from(ADMINS_TABLE)
@@ -130,7 +141,7 @@ function isApprovedAdmin() {
 }
 
 function isOwner() {
-  return currentAdmin?.role === "owner" || currentUser?.email === OWNER_EMAIL;
+  return currentUser?.email === OWNER_EMAIL;
 }
 
 function canManagePost(post) {
@@ -150,13 +161,19 @@ function renderAuthSlot() {
   }
 
   if (!currentUser) {
-    authSlot.innerHTML = '<button class="btn btn-sm btn-outline-dark ms-lg-2" type="button" data-auth-action="signin">Sign in with Email</button>';
+    authSlot.innerHTML = `
+      <div class="btn-group btn-group-sm" role="group">
+        <button type="button" class="btn btn-outline-dark" data-auth-action="signup">Sign Up</button>
+        <button type="button" class="btn btn-outline-dark" data-auth-action="login">Log In</button>
+      </div>
+    `;
     return;
   }
 
   authSlot.innerHTML = `
     <div class="auth-chip">
       <span>${escapeHtml(currentUser.email)}</span>
+      ${isOwner() ? '<span class="badge bg-danger">Owner</span>' : isApprovedAdmin() ? '<span class="badge bg-info">Admin</span>' : ''}
       <button type="button" data-auth-action="signout">Sign out</button>
     </div>
   `;
@@ -166,31 +183,37 @@ document.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-auth-action]")?.dataset.authAction;
   if (!action) return;
 
-  if (action === "signin") await showMagicLinkModal();
+  if (action === "signup") await showSignUpModal();
+  if (action === "login") await showLoginModal();
   if (action === "signout") await signOut();
 });
 
-async function showMagicLinkModal() {
+async function showSignUpModal() {
   if (!supabaseClient) return;
 
   const modalHtml = `
-    <div class="modal fade" id="magicLinkModal" tabindex="-1" aria-labelledby="magicLinkLabel" aria-hidden="true">
+    <div class="modal fade" id="signupModal" tabindex="-1" aria-labelledby="signupLabel" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title" id="magicLinkLabel">Sign in with Magic Link</h5>
+            <h5 class="modal-title" id="signupLabel">Create Account</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
-          <form id="magicLinkForm">
+          <form id="signupForm">
             <div class="modal-body">
-              <p>Enter your email to receive a sign-in link. Check your inbox and click the link to continue.</p>
-              <label class="form-label" for="magicLinkEmail">Email address</label>
-              <input class="form-control" id="magicLinkEmail" type="email" placeholder="you@example.com" required>
-              <div id="magicLinkMessage" class="mt-3"></div>
+              <label class="form-label" for="signupEmail">Email address</label>
+              <input class="form-control" id="signupEmail" type="email" placeholder="you@example.com" required>
+              <label class="form-label mt-3" for="signupName">Full Name</label>
+              <input class="form-control" id="signupName" type="text" placeholder="Your name" required>
+              <label class="form-label mt-3" for="signupPassword">Password</label>
+              <input class="form-control" id="signupPassword" type="password" placeholder="Create a password" required>
+              <label class="form-label mt-3" for="signupPasswordConfirm">Confirm Password</label>
+              <input class="form-control" id="signupPasswordConfirm" type="password" placeholder="Confirm password" required>
+              <div id="signupMessage" class="mt-3"></div>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-              <button type="submit" class="btn btn-torch">Send Magic Link</button>
+              <button type="submit" class="btn btn-torch">Create Account</button>
             </div>
           </form>
         </div>
@@ -198,48 +221,197 @@ async function showMagicLinkModal() {
     </div>
   `;
 
-  // Remove existing modal if present
-  const existing = document.getElementById("magicLinkModal");
+  const existing = document.getElementById("signupModal");
   if (existing) existing.remove();
 
-  // Add modal to page
   document.body.insertAdjacentHTML("beforeend", modalHtml);
   
-  const modal = new bootstrap.Modal(document.getElementById("magicLinkModal"));
-  const form = document.getElementById("magicLinkForm");
-  const emailInput = document.getElementById("magicLinkEmail");
-  const messageDiv = document.getElementById("magicLinkMessage");
+  const modal = new bootstrap.Modal(document.getElementById("signupModal"));
+  const form = document.getElementById("signupForm");
+  const messageDiv = document.getElementById("signupMessage");
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const email = emailInput.value.trim();
-    
-    if (!email) return;
+    const email = document.getElementById("signupEmail").value.trim();
+    const name = document.getElementById("signupName").value.trim();
+    const password = document.getElementById("signupPassword").value;
+    const passwordConfirm = document.getElementById("signupPasswordConfirm").value;
+
+    if (password !== passwordConfirm) {
+      messageDiv.innerHTML = '<div class="alert alert-danger">Passwords do not match</div>';
+      return;
+    }
 
     const submitButton = form.querySelector("button[type='submit']");
     submitButton.disabled = true;
-    submitButton.textContent = "Sending...";
+    submitButton.textContent = "Creating...";
     messageDiv.innerHTML = "";
 
     try {
-      const { error } = await supabaseClient.auth.signInWithOtp({
+      const { data, error } = await supabaseClient.auth.signUp({
         email,
+        password,
         options: {
-          emailRedirectTo: `${window.location.origin}${window.location.pathname}`
+          data: { full_name: name }
         }
       });
 
       if (error) throw error;
 
-      messageDiv.innerHTML = `<div class="alert alert-success">Check your email for a sign-in link!</div>`;
-      emailInput.value = "";
+      messageDiv.innerHTML = `<div class="alert alert-success">Account created! Check your email to confirm.</div>`;
       setTimeout(() => modal.hide(), 2000);
     } catch (error) {
       console.error(error);
       messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
     } finally {
       submitButton.disabled = false;
-      submitButton.textContent = "Send Magic Link";
+      submitButton.textContent = "Create Account";
+    }
+  });
+
+  modal.show();
+}
+
+async function showLoginModal() {
+  if (!supabaseClient) return;
+
+  const modalHtml = `
+    <div class="modal fade" id="loginModal" tabindex="-1" aria-labelledby="loginLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="loginLabel">Log In</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form id="loginForm">
+            <div class="modal-body">
+              <label class="form-label" for="loginEmail">Email address</label>
+              <input class="form-control" id="loginEmail" type="email" placeholder="you@example.com" required>
+              <label class="form-label mt-3" for="loginPassword">Password</label>
+              <input class="form-control" id="loginPassword" type="password" placeholder="Enter your password" required>
+              <div id="loginMessage" class="mt-3"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-torch">Log In</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const existing = document.getElementById("loginModal");
+  if (existing) existing.remove();
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  
+  const modal = new bootstrap.Modal(document.getElementById("loginModal"));
+  const form = document.getElementById("loginForm");
+  const messageDiv = document.getElementById("loginMessage");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("loginEmail").value.trim();
+    const password = document.getElementById("loginPassword").value;
+
+    const submitButton = form.querySelector("button[type='submit']");
+    submitButton.disabled = true;
+    submitButton.textContent = "Logging in...";
+    messageDiv.innerHTML = "";
+
+    try {
+      const { error } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) throw error;
+
+      messageDiv.innerHTML = '<div class="alert alert-success">Login successful!</div>';
+      setTimeout(() => modal.hide(), 1000);
+    } catch (error) {
+      console.error(error);
+      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Log In";
+    }
+  });
+
+  modal.show();
+}
+
+async function showOwnerPasswordSetupModal() {
+  if (!supabaseClient) return;
+
+  const modalHtml = `
+    <div class="modal fade" id="ownerSetupModal" tabindex="-1" aria-labelledby="ownerSetupLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="ownerSetupLabel">Welcome, Owner! Set Up Your Password</h5>
+          </div>
+          <form id="ownerSetupForm">
+            <div class="modal-body">
+              <p class="text-muted">This is your first login. Please set a secure password.</p>
+              <label class="form-label" for="ownerPassword">Create Password</label>
+              <input class="form-control" id="ownerPassword" type="password" placeholder="Create a strong password" required>
+              <label class="form-label mt-3" for="ownerPasswordConfirm">Confirm Password</label>
+              <input class="form-control" id="ownerPasswordConfirm" type="password" placeholder="Confirm password" required>
+              <div id="ownerSetupMessage" class="mt-3"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-torch">Set Password & Continue</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const existing = document.getElementById("ownerSetupModal");
+  if (existing) existing.remove();
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  
+  const modal = new bootstrap.Modal(document.getElementById("ownerSetupModal"));
+  const form = document.getElementById("ownerSetupForm");
+  const messageDiv = document.getElementById("ownerSetupMessage");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const password = document.getElementById("ownerPassword").value;
+    const passwordConfirm = document.getElementById("ownerPasswordConfirm").value;
+
+    if (password !== passwordConfirm) {
+      messageDiv.innerHTML = '<div class="alert alert-danger">Passwords do not match</div>';
+      return;
+    }
+
+    const submitButton = form.querySelector("button[type='submit']");
+    submitButton.disabled = true;
+    submitButton.textContent = "Setting up...";
+    messageDiv.innerHTML = "";
+
+    try {
+      const { error } = await supabaseClient.auth.updateUser({
+        password: password
+      });
+
+      if (error) throw error;
+
+      // Mark password as set
+      await supabaseClient.from("profiles").update({ password_set: true }).eq("id", currentUser.id);
+
+      messageDiv.innerHTML = '<div class="alert alert-success">Password set successfully! Redirecting...</div>';
+      setTimeout(() => modal.hide(), 1500);
+    } catch (error) {
+      console.error(error);
+      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Set Password & Continue";
     }
   });
 
@@ -278,7 +450,7 @@ async function loadPosts() {
   if (error) {
     console.error(error);
     if (configNotice) {
-      configNotice.textContent = "Supabase could not load posts. Check tables, policies, and email auth setup.";
+      configNotice.textContent = "Supabase could not load posts. Check tables and policies.";
       configNotice.classList.remove("d-none");
     }
     posts = getLocalPosts();
@@ -319,7 +491,7 @@ function renderPosts() {
           <div class="comment-item">
             <div class="comment-row">
               <strong>${escapeHtml(comment.author || "Guest")}</strong>
-              ${canManageComment(comment) ? `<button class="danger-link" type="button" data-delete-comment="${comment.id}">Delete</button>` : ""}
+              ${canManageComment(comment) ? `<button class="danger-link" type="button" data-delete-comment="${comment.id}">Delete</button>` : "'}
             </div>
             <p>${escapeHtml(comment.body)}</p>
           </div>
@@ -394,7 +566,7 @@ if (createPostButton) {
     if (supabaseClient && !currentUser) {
       event.preventDefault();
       event.stopPropagation();
-      await showMagicLinkModal();
+      await showSignUpModal();
     }
   });
 }
@@ -404,7 +576,7 @@ if (postForm) {
     event.preventDefault();
 
     if (supabaseClient && !currentUser) {
-      await showMagicLinkModal();
+      await showSignUpModal();
       return;
     }
 
@@ -499,7 +671,7 @@ if (feed) {
     event.preventDefault();
 
     if (supabaseClient && !currentUser) {
-      await showMagicLinkModal();
+      await showSignUpModal();
       return;
     }
 
@@ -549,7 +721,7 @@ if (feed) {
 
 async function incrementPostCounter(postId, field) {
   if (supabaseClient && !currentUser) {
-    await showMagicLinkModal();
+    await showSignUpModal();
     return;
   }
 
@@ -618,7 +790,7 @@ async function deleteCommentById(commentId) {
 
 async function requestAdminAccess() {
   if (!currentUser) {
-    await showMagicLinkModal();
+    await showSignUpModal();
     return;
   }
 
@@ -652,8 +824,11 @@ async function loadStudio() {
     gate.innerHTML = `
       <div class="dashboard-card">
         <h2>Sign in to view your studio</h2>
-        <p>Use email sign-in to see your posts, engagement, and admin access status.</p>
-        <button class="btn btn-torch" type="button" data-auth-action="signin">Sign in with Email</button>
+        <p>Create an account or log in to see your posts, engagement, and admin access status.</p>
+        <div class="btn-group" role="group">
+          <button class="btn btn-torch" type="button" data-auth-action="signup">Sign Up</button>
+          <button class="btn btn-outline-dark" type="button" data-auth-action="login">Log In</button>
+        </div>
       </div>
     `;
     content.classList.add("d-none");
@@ -687,7 +862,7 @@ async function renderAdminRequestStatus(container) {
 
   const latest = data?.[0];
   if (isApprovedAdmin()) {
-    container.innerHTML = '<div class="dashboard-card"><h3>Admin Access</h3><p>Your admin access is approved.</p><a class="btn btn-torch" href="admin.html">Open Admin Dashboard</a></div>';
+    container.innerHTML = '<div class="dashboard-card"><h3>Admin Access</h3><p>Your admin access is approved!</p><a class="btn btn-torch" href="admin.html">Open Admin Dashboard</a></div>';
     return;
   }
 
@@ -698,7 +873,7 @@ async function renderAdminRequestStatus(container) {
 
   container.innerHTML = `
     <div class="dashboard-card">
-      <h3>Admin Access</h3>
+      <h3>Request Admin Access</h3>
       <p>Need to help manage official Torch Africa content? Request owner approval.</p>
       <button class="btn btn-outline-dark" type="button" id="requestAdminButton">Request Admin Access</button>
     </div>
@@ -718,9 +893,12 @@ async function loadAdminDashboard() {
   if (!supabaseClient || !currentUser) {
     gate.innerHTML = `
       <div class="dashboard-card">
-        <h2>Admin sign in required</h2>
-        <p>Use email sign-in to continue to the Torch Africa dashboard.</p>
-        <button class="btn btn-torch" type="button" data-auth-action="signin">Sign in with Email</button>
+        <h2>Admin Access Required</h2>
+        <p>Sign in to access the admin dashboard.</p>
+        <div class="btn-group" role="group">
+          <button class="btn btn-torch" type="button" data-auth-action="login">Log In</button>
+          <button class="btn btn-outline-dark" type="button" data-auth-action="signup">Sign Up</button>
+        </div>
       </div>
     `;
     content.classList.add("d-none");
@@ -729,13 +907,12 @@ async function loadAdminDashboard() {
 
   if (!isApprovedAdmin()) {
     gate.innerHTML = `
-      <div class="dashboard-card">
-        <h2>Admin access pending</h2>
-        <p>${escapeHtml(currentUser.email)} is signed in but not approved as an admin.</p>
-        <button class="btn btn-outline-dark" type="button" id="requestAdminButton">Request Admin Access</button>
+      <div class="dashboard-card alert-danger">
+        <h2>🔒 Admin Access Denied</h2>
+        <p>${escapeHtml(currentUser.email)} is not an approved admin.</p>
+        ${isOwner() ? '' : '<p class="text-muted mt-2">Contact the owner to request admin access.</p>'}
       </div>
     `;
-    document.getElementById("requestAdminButton")?.addEventListener("click", requestAdminAccess);
     content.classList.add("d-none");
     return;
   }
@@ -781,7 +958,7 @@ async function renderAdminRequests(container) {
 
   container.innerHTML = `
     <div class="dashboard-card">
-      <h3>Admin Requests</h3>
+      <h3>👥 Admin Access Requests</h3>
       <div class="request-list">
         ${data.map((request) => `
           <div class="request-item">
