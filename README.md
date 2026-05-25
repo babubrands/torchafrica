@@ -38,6 +38,8 @@ Enable **Authentication > Providers > Email** in Supabase. For the lowest-fricti
 
 Supabase stores the session in the browser by default, and this site also enables persistent sessions, so members stay signed in on the same device for future visits until they sign out.
 
+For password resets, the login dialog includes a **Forgot password?** flow. In Supabase, keep the recovery email template configured to send the recovery OTP/token so members can paste it into the reset dialog, set a new password, and return to login.
+
 Then run this setup in **SQL Editor**. It creates profiles, member posts, comments, owner/admin approval, secure delete rules, and safe like/repost counters.
 
 ```sql

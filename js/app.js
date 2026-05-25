@@ -369,6 +369,7 @@ async function showLoginModal() {
               <input class="form-control" id="loginEmail" type="email" placeholder="you@example.com" required>
               <label class="form-label mt-3" for="loginPassword">Password</label>
               <input class="form-control" id="loginPassword" type="password" placeholder="Enter your password" required>
+              <button class="link-button mt-2" type="button" id="forgotPasswordButton">Forgot password?</button>
               <div id="loginMessage" class="mt-3"></div>
             </div>
             <div class="modal-footer">
@@ -389,6 +390,13 @@ async function showLoginModal() {
   const modal = new bootstrap.Modal(document.getElementById("loginModal"));
   const form = document.getElementById("loginForm");
   const messageDiv = document.getElementById("loginMessage");
+  const forgotPasswordButton = document.getElementById("forgotPasswordButton");
+
+  forgotPasswordButton?.addEventListener("click", () => {
+    const email = document.getElementById("loginEmail").value.trim();
+    modal.hide();
+    showPasswordResetModal(email);
+  });
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -416,6 +424,126 @@ async function showLoginModal() {
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = "Log In";
+    }
+  });
+
+  modal.show();
+}
+
+
+async function showPasswordResetModal(prefilledEmail = "") {
+  if (!supabaseClient) return;
+
+  const modalHtml = `
+    <div class="modal fade" id="passwordResetModal" tabindex="-1" aria-labelledby="passwordResetLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="passwordResetLabel">Reset Password</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form id="passwordResetForm">
+            <div class="modal-body">
+              <label class="form-label" for="resetEmail">Email address</label>
+              <input class="form-control" id="resetEmail" type="email" placeholder="you@example.com" value="${escapeHtml(prefilledEmail)}" required>
+              <button class="btn btn-outline-dark w-100 mt-3" type="button" id="sendResetOtpButton">Send OTP</button>
+              <label class="form-label mt-3" for="resetOtp">Email OTP</label>
+              <input class="form-control" id="resetOtp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter OTP from email" required>
+              <label class="form-label mt-3" for="resetPassword">New password</label>
+              <input class="form-control" id="resetPassword" type="password" placeholder="Create a new password" required>
+              <label class="form-label mt-3" for="resetPasswordConfirm">Confirm new password</label>
+              <input class="form-control" id="resetPasswordConfirm" type="password" placeholder="Confirm new password" required>
+              <div id="resetMessage" class="mt-3"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-torch">Set New Password</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const existing = document.getElementById("passwordResetModal");
+  if (existing) existing.remove();
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+
+  const modal = new bootstrap.Modal(document.getElementById("passwordResetModal"));
+  const form = document.getElementById("passwordResetForm");
+  const messageDiv = document.getElementById("resetMessage");
+  const sendOtpButton = document.getElementById("sendResetOtpButton");
+
+  sendOtpButton.addEventListener("click", async () => {
+    const email = document.getElementById("resetEmail").value.trim();
+    if (!email) {
+      messageDiv.innerHTML = '<div class="alert alert-danger">Enter your email first.</div>';
+      return;
+    }
+
+    sendOtpButton.disabled = true;
+    sendOtpButton.textContent = "Sending OTP...";
+    messageDiv.innerHTML = "";
+
+    try {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: getAuthRedirectUrl()
+      });
+      if (error) throw error;
+      messageDiv.innerHTML = '<div class="alert alert-success">OTP sent. Check your email, then enter it below.</div>';
+    } catch (error) {
+      console.error(error);
+      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+      sendOtpButton.disabled = false;
+      sendOtpButton.textContent = "Send OTP";
+    }
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const email = document.getElementById("resetEmail").value.trim();
+    const token = document.getElementById("resetOtp").value.trim();
+    const password = document.getElementById("resetPassword").value;
+    const passwordConfirm = document.getElementById("resetPasswordConfirm").value;
+
+    if (password !== passwordConfirm) {
+      messageDiv.innerHTML = '<div class="alert alert-danger">Passwords do not match.</div>';
+      return;
+    }
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    submitButton.textContent = "Updating...";
+    messageDiv.innerHTML = "";
+
+    try {
+      const { error: verifyError } = await supabaseClient.auth.verifyOtp({
+        email,
+        token,
+        type: "recovery"
+      });
+      if (verifyError) throw verifyError;
+
+      const { error: updateError } = await supabaseClient.auth.updateUser({ password });
+      if (updateError) throw updateError;
+
+      await supabaseClient.auth.signOut();
+      currentUser = null;
+      await refreshAuthenticatedViews();
+      messageDiv.innerHTML = '<div class="alert alert-success">Password updated. Return to login with your new password.</div>';
+      setTimeout(() => {
+        modal.hide();
+        showLoginModal();
+      }, 1100);
+    } catch (error) {
+      console.error(error);
+      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Set New Password";
     }
   });
 

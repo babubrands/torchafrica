@@ -581,6 +581,21 @@ h3 {
   min-height: 1.35rem;
 }
 
+.link-button {
+  background: transparent;
+  border: 0;
+  color: var(--torch-red);
+  font-weight: 800;
+  padding: 0;
+  text-align: left;
+}
+
+.link-button:hover,
+.link-button:focus {
+  color: #86141a;
+  text-decoration: underline;
+}
+
 .site-footer {
   background: #081513;
   color: rgba(255, 255, 255, .78);
