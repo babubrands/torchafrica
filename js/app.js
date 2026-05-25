@@ -7,6 +7,7 @@ const ADMIN_REQUESTS_TABLE = "admin_requests";
 const STORAGE_BUCKET = "post-uploads";
 const OWNER_EMAIL = "ebarasa203@gmail.com";
 const TORCH_ADMIN_EMAIL = "torchafrica@gmail.com";
+const APP_PUBLIC_URL = "https://torchafrica.vercel.app";
 
 const demoPosts = [
   {
@@ -53,6 +54,10 @@ let posts = [];
 let currentUser = null;
 let currentAdmin = null;
 let afterAuthSuccess = null;
+let passwordResetModalOpen = false;
+let passwordRecoverySessionActive = false;
+let postViewObserver = null;
+const viewedPostTimers = new Map();
 
 function withTimeout(promise, message, timeoutMs = 20000) {
   return Promise.race([
@@ -65,6 +70,31 @@ function withTimeout(promise, message, timeoutMs = 20000) {
 
 function getAuthRedirectUrl() {
   return window.location.href.split("#")[0].split("?")[0];
+}
+
+function getPasswordResetRedirectUrl() {
+  const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const url = new URL(isLocalhost ? APP_PUBLIC_URL : getAuthRedirectUrl());
+  url.searchParams.set("reset-password", "1");
+  return url.toString();
+}
+
+function hasPasswordResetIntent() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return searchParams.has("reset-password") || hashParams.get("type") === "recovery";
+}
+
+function cleanPasswordResetUrl() {
+  if (!hasPasswordResetIntent()) return;
+  window.history.replaceState({}, document.title, getAuthRedirectUrl());
+}
+
+function showLoginAfterModalClose(modalElement, modal) {
+  modalElement.addEventListener("hidden.bs.modal", () => {
+    showLoginModal();
+  }, { once: true });
+  modal.hide();
 }
 
 const feed = document.getElementById("feed");
@@ -131,8 +161,14 @@ async function initAuth() {
   await loadAdminStatus();
   renderAuthSlot();
 
-  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+  supabaseClient.auth.onAuthStateChange(async (event, session) => {
     currentUser = session?.user || null;
+    if (event === "PASSWORD_RECOVERY") {
+      passwordRecoverySessionActive = true;
+      if (!passwordResetModalOpen) {
+        showPasswordResetModal(currentUser?.email || "", { recoveryLinkMode: true });
+      }
+    }
     await syncSignedInUser();
     await loadAdminStatus();
     renderAuthSlot();
@@ -153,7 +189,32 @@ async function refreshAuthenticatedViews() {
 
 function promptForAuth(nextAction) {
   afterAuthSuccess = nextAction || null;
-  showSignUpModal();
+  showLoginModal();
+}
+
+async function ensureCurrentSession() {
+  if (!supabaseClient) return currentUser;
+  if (currentUser) return currentUser;
+
+  const { data } = await supabaseClient.auth.getSession();
+  currentUser = data.session?.user || null;
+  if (currentUser) {
+    await syncSignedInUser();
+    await loadAdminStatus();
+    renderAuthSlot();
+  }
+  return currentUser;
+}
+
+function getUserDisplayName(user = currentUser) {
+  return user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || "";
+}
+
+function preparePostFormDefaults() {
+  const authorInput = document.getElementById("postAuthor");
+  if (authorInput && currentUser && !authorInput.value.trim()) {
+    authorInput.value = getUserDisplayName();
+  }
 }
 
 async function finishAuthFlow(modal, messageDiv, message) {
@@ -173,7 +234,7 @@ async function syncSignedInUser() {
   const profile = {
     id: currentUser.id,
     email: currentUser.email,
-    full_name: currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || currentUser.email,
+    full_name: getUserDisplayName(),
     avatar_url: currentUser.user_metadata?.avatar_url || "",
     updated_at: new Date().toISOString()
   };
@@ -214,7 +275,8 @@ function canManagePost(post) {
 }
 
 function canManageComment(comment) {
-  return Boolean(currentUser && (comment.user_id === currentUser.id || isApprovedAdmin()));
+  const parentPost = posts.find((post) => String(post.id) === String(comment.post_id));
+  return Boolean(currentUser && (comment.user_id === currentUser.id || parentPost?.user_id === currentUser.id || isApprovedAdmin()));
 }
 
 function renderAuthSlot() {
@@ -235,13 +297,33 @@ function renderAuthSlot() {
     return;
   }
 
+  const profileImage = currentUser.user_metadata?.avatar_url
+    ? `<img src="${escapeHtml(currentUser.user_metadata.avatar_url)}" alt="">`
+    : `<span>${escapeHtml(getInitials(getUserDisplayName()))}</span>`;
   authSlot.innerHTML = `
-    <div class="auth-chip">
-      <span>${escapeHtml(currentUser.email)}</span>
-      ${isOwner() ? '<span class="badge bg-danger">Owner</span>' : isApprovedAdmin() ? '<span class="badge bg-info">Admin</span>' : ''}
-      <button type="button" data-auth-action="signout">Sign out</button>
+    <div class="dropdown profile-menu">
+      <button class="profile-button" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Open profile menu" title="Profile">
+        ${profileImage}
+      </button>
+      <div class="dropdown-menu dropdown-menu-end profile-dropdown">
+        <div class="profile-summary">
+          <strong>${escapeHtml(getUserDisplayName() || "Torch Africa Member")}</strong>
+          <span>${escapeHtml(currentUser.email)}</span>
+          ${isOwner() ? '<em>Owner</em>' : isApprovedAdmin() ? '<em>Admin</em>' : '<em>Member</em>'}
+        </div>
+        <a class="dropdown-item" href="studio.html">My Dashboard</a>
+        ${isApprovedAdmin() ? '<a class="dropdown-item" href="admin.html">Admin Dashboard</a>' : ''}
+        <button class="dropdown-item" type="button" data-auth-action="signout">Sign out</button>
+      </div>
     </div>
   `;
+}
+
+function getInitials(value) {
+  const parts = String(value || "TA").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "TA";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
 document.addEventListener("click", async (event) => {
@@ -409,18 +491,30 @@ async function showLoginModal() {
     messageDiv.innerHTML = "";
 
     try {
-      const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email,
-        password
-      });
+      const { data, error } = await withTimeout(
+        supabaseClient.auth.signInWithPassword({
+          email,
+          password
+        }),
+        "Login timed out. Please check your connection and try again."
+      );
 
       if (error) throw error;
 
-      currentUser = data.session?.user || currentUser;
+      currentUser = data.session?.user || null;
+      if (!currentUser) {
+        const { data: sessionData } = await supabaseClient.auth.getSession();
+        currentUser = sessionData.session?.user || null;
+      }
+      if (!currentUser) throw new Error("Login did not create a session. Check Supabase email confirmation settings for this user.");
+
       await finishAuthFlow(modal, messageDiv, "Login successful. You are signed in on this device.");
     } catch (error) {
       console.error(error);
-      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+      const hint = /confirm|verified|session/i.test(error.message || "")
+        ? " If email confirmation is enabled in Supabase, confirm this email or turn off Confirm email for password logins."
+        : "";
+      messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}${hint}</div>`;
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = "Log In";
@@ -431,8 +525,18 @@ async function showLoginModal() {
 }
 
 
-async function showPasswordResetModal(prefilledEmail = "") {
+async function showPasswordResetModal(prefilledEmail = "", options = {}) {
   if (!supabaseClient) return;
+
+  passwordResetModalOpen = true;
+  const recoveryLinkMode = Boolean(options.recoveryLinkMode || passwordRecoverySessionActive);
+  const otpFieldHtml = recoveryLinkMode ? "" : `
+              <button class="btn btn-outline-dark w-100 mt-3" type="button" id="sendResetOtpButton">Send 6-Digit OTP</button>
+              <label class="form-label mt-3" for="resetOtp">Email OTP</label>
+              <input class="form-control" id="resetOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="Enter 6-digit code" required>`;
+  const introMessage = recoveryLinkMode
+    ? '<div class="alert alert-info">Your reset link is verified. Enter a new password below.</div>'
+    : "";
 
   const modalHtml = `
     <div class="modal fade" id="passwordResetModal" tabindex="-1" aria-labelledby="passwordResetLabel" aria-hidden="true">
@@ -445,15 +549,13 @@ async function showPasswordResetModal(prefilledEmail = "") {
           <form id="passwordResetForm">
             <div class="modal-body">
               <label class="form-label" for="resetEmail">Email address</label>
-              <input class="form-control" id="resetEmail" type="email" placeholder="you@example.com" value="${escapeHtml(prefilledEmail)}" required>
-              <button class="btn btn-outline-dark w-100 mt-3" type="button" id="sendResetOtpButton">Send OTP</button>
-              <label class="form-label mt-3" for="resetOtp">Email OTP</label>
-              <input class="form-control" id="resetOtp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter OTP from email" required>
+              <input class="form-control" id="resetEmail" type="email" placeholder="you@example.com" value="${escapeHtml(prefilledEmail)}" ${recoveryLinkMode ? "readonly" : "required"}>
+              ${otpFieldHtml}
               <label class="form-label mt-3" for="resetPassword">New password</label>
               <input class="form-control" id="resetPassword" type="password" placeholder="Create a new password" required>
               <label class="form-label mt-3" for="resetPasswordConfirm">Confirm new password</label>
               <input class="form-control" id="resetPasswordConfirm" type="password" placeholder="Confirm new password" required>
-              <div id="resetMessage" class="mt-3"></div>
+              <div id="resetMessage" class="mt-3">${introMessage}</div>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -470,12 +572,23 @@ async function showPasswordResetModal(prefilledEmail = "") {
 
   document.body.insertAdjacentHTML("beforeend", modalHtml);
 
-  const modal = new bootstrap.Modal(document.getElementById("passwordResetModal"));
+  const modalElement = document.getElementById("passwordResetModal");
+  const modal = new bootstrap.Modal(modalElement);
   const form = document.getElementById("passwordResetForm");
   const messageDiv = document.getElementById("resetMessage");
   const sendOtpButton = document.getElementById("sendResetOtpButton");
+  const resetOtpInput = document.getElementById("resetOtp");
 
-  sendOtpButton.addEventListener("click", async () => {
+  modalElement.addEventListener("hidden.bs.modal", () => {
+    passwordResetModalOpen = false;
+    cleanPasswordResetUrl();
+  }, { once: true });
+
+  resetOtpInput?.addEventListener("input", () => {
+    resetOtpInput.value = resetOtpInput.value.replace(/\D/g, "").slice(0, 6);
+  });
+
+  sendOtpButton?.addEventListener("click", async () => {
     const email = document.getElementById("resetEmail").value.trim();
     if (!email) {
       messageDiv.innerHTML = '<div class="alert alert-danger">Enter your email first.</div>';
@@ -488,16 +601,16 @@ async function showPasswordResetModal(prefilledEmail = "") {
 
     try {
       const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-        redirectTo: getAuthRedirectUrl()
+        redirectTo: getPasswordResetRedirectUrl()
       });
       if (error) throw error;
-      messageDiv.innerHTML = '<div class="alert alert-success">OTP sent. Check your email, then enter it below.</div>';
+      messageDiv.innerHTML = '<div class="alert alert-success">A 6-digit OTP has been sent. Check your email, then enter it below.</div>';
     } catch (error) {
       console.error(error);
       messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
     } finally {
       sendOtpButton.disabled = false;
-      sendOtpButton.textContent = "Send OTP";
+      sendOtpButton.textContent = "Send 6-Digit OTP";
     }
   });
 
@@ -505,9 +618,14 @@ async function showPasswordResetModal(prefilledEmail = "") {
     event.preventDefault();
 
     const email = document.getElementById("resetEmail").value.trim();
-    const token = document.getElementById("resetOtp").value.trim();
+    const token = document.getElementById("resetOtp")?.value.trim() || "";
     const password = document.getElementById("resetPassword").value;
     const passwordConfirm = document.getElementById("resetPasswordConfirm").value;
+
+    if (!recoveryLinkMode && !/^\d{6}$/.test(token)) {
+      messageDiv.innerHTML = '<div class="alert alert-danger">Enter the 6-digit OTP from your email.</div>';
+      return;
+    }
 
     if (password !== passwordConfirm) {
       messageDiv.innerHTML = '<div class="alert alert-danger">Passwords do not match.</div>';
@@ -520,23 +638,37 @@ async function showPasswordResetModal(prefilledEmail = "") {
     messageDiv.innerHTML = "";
 
     try {
-      const { error: verifyError } = await supabaseClient.auth.verifyOtp({
-        email,
-        token,
-        type: "recovery"
-      });
-      if (verifyError) throw verifyError;
+      if (!recoveryLinkMode) {
+        const { error: verifyError } = await withTimeout(
+          supabaseClient.auth.verifyOtp({
+            email,
+            token,
+            type: "recovery"
+          }),
+          "OTP verification took too long. Please request a fresh code and try again."
+        );
+        if (verifyError) throw verifyError;
+      }
 
-      const { error: updateError } = await supabaseClient.auth.updateUser({ password });
+      const { error: updateError } = await withTimeout(
+        supabaseClient.auth.updateUser({ password }),
+        "Password update took too long. Please try again."
+      );
       if (updateError) throw updateError;
 
-      await supabaseClient.auth.signOut();
       currentUser = null;
-      await refreshAuthenticatedViews();
-      messageDiv.innerHTML = '<div class="alert alert-success">Password updated. Return to login with your new password.</div>';
+      passwordRecoverySessionActive = false;
+
+      try {
+        await withTimeout(supabaseClient.auth.signOut(), "Sign out took too long.", 8000);
+        await withTimeout(refreshAuthenticatedViews(), "Page refresh took too long.", 8000);
+      } catch (cleanupError) {
+        console.warn(cleanupError);
+      }
+
+      messageDiv.innerHTML = '<div class="alert alert-success">Password updated. Opening login...</div>';
       setTimeout(() => {
-        modal.hide();
-        showLoginModal();
+        showLoginAfterModalClose(modalElement, modal);
       }, 1100);
     } catch (error) {
       console.error(error);
@@ -604,6 +736,7 @@ function renderPosts() {
   if (!feed) return;
 
   if (!posts.length) {
+    clearPostViewObserver();
     feed.innerHTML = '<div class="post-card post-content">No posts yet. Create the first update.</div>';
     return;
   }
@@ -618,6 +751,9 @@ function renderPosts() {
     const deleteButton = canManagePost(post)
       ? `<button class="danger-link" type="button" data-delete-post="${post.id}">Delete</button>`
       : "";
+    const editButton = canManagePost(post)
+      ? `<button class="icon-action" type="button" data-edit-post="${post.id}">Edit</button>`
+      : "";
     const commentList = comments.length
       ? comments.map((comment) => `
           <div class="comment-item">
@@ -631,7 +767,7 @@ function renderPosts() {
       : '<p class="comment-empty">No comments yet. Start the conversation.</p>';
 
     return `
-      <article class="post-card">
+      <article class="post-card" data-post-id="${post.id}">
         ${image}
         <div class="post-content">
           <div class="post-meta">
@@ -656,6 +792,7 @@ function renderPosts() {
               <span aria-hidden="true">Comment</span>
               <span>${comments.length}</span>
             </button>
+            ${editButton}
             ${deleteButton}
           </div>
           ${documentLink}
@@ -670,6 +807,50 @@ function renderPosts() {
       </article>
     `;
   }).join("");
+  observePostViews();
+}
+
+function clearPostViewObserver() {
+  if (postViewObserver) postViewObserver.disconnect();
+  viewedPostTimers.forEach((timerId) => clearTimeout(timerId));
+  viewedPostTimers.clear();
+}
+
+function observePostViews() {
+  if (!feed || !("IntersectionObserver" in window)) return;
+
+  clearPostViewObserver();
+
+  postViewObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const postId = entry.target.dataset.postId;
+      if (!postId || hasCountedPostView(postId)) return;
+
+      if (entry.isIntersecting) {
+        if (viewedPostTimers.has(postId)) return;
+        const timerId = setTimeout(() => markPostViewed(postId), 1200);
+        viewedPostTimers.set(postId, timerId);
+        return;
+      }
+
+      const timerId = viewedPostTimers.get(postId);
+      if (timerId) clearTimeout(timerId);
+      viewedPostTimers.delete(postId);
+    });
+  }, { threshold: 0.5 });
+
+  feed.querySelectorAll("[data-post-id]").forEach((postElement) => postViewObserver.observe(postElement));
+}
+
+function hasCountedPostView(postId) {
+  return sessionStorage.getItem(`torchAfricaViewedPost:${postId}`) === "1";
+}
+
+async function markPostViewed(postId) {
+  viewedPostTimers.delete(postId);
+  if (hasCountedPostView(postId)) return;
+  sessionStorage.setItem(`torchAfricaViewedPost:${postId}`, "1");
+  await incrementPostCounter(postId, "views", { silent: true });
 }
 
 async function uploadFile(file, folder) {
@@ -698,11 +879,16 @@ async function uploadFile(file, folder) {
 
 if (createPostButton) {
   createPostButton.addEventListener("click", async (event) => {
-    if (supabaseClient && !currentUser) {
-      event.preventDefault();
-      event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (supabaseClient && !await ensureCurrentSession()) {
       promptForAuth(() => bootstrap.Modal.getOrCreateInstance(document.getElementById("postModal")).show());
+      return;
     }
+
+    preparePostFormDefaults();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("postModal")).show();
   });
 }
 
@@ -710,7 +896,7 @@ if (postForm) {
   postForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    if (supabaseClient && !currentUser) {
+    if (supabaseClient && !await ensureCurrentSession()) {
       promptForAuth(() => bootstrap.Modal.getOrCreateInstance(document.getElementById("postModal")).show());
       return;
     }
@@ -723,8 +909,7 @@ if (postForm) {
       const imageUrl = await uploadFile(document.getElementById("postImage").files[0], "images");
       const documentUrl = await uploadFile(document.getElementById("postDocument").files[0], "documents");
       const displayName = document.getElementById("postAuthor").value.trim()
-        || currentUser?.user_metadata?.full_name
-        || currentUser?.email
+        || getUserDisplayName()
         || "Torch Africa";
       const newPost = {
         user_id: currentUser?.id || null,
@@ -769,6 +954,8 @@ if (postForm) {
   });
 }
 
+document.getElementById("postModal")?.addEventListener("shown.bs.modal", preparePostFormDefaults);
+
 if (feed) {
   feed.addEventListener("click", async (event) => {
     const commentToggle = event.target.closest("[data-comment-toggle]");
@@ -781,6 +968,12 @@ if (feed) {
     const deletePost = event.target.closest("[data-delete-post]");
     if (deletePost) {
       await deletePostById(deletePost.dataset.deletePost);
+      return;
+    }
+
+    const editPost = event.target.closest("[data-edit-post]");
+    if (editPost) {
+      showPostEditor(editPost.dataset.editPost);
       return;
     }
 
@@ -808,7 +1001,7 @@ if (feed) {
 
     event.preventDefault();
 
-    if (supabaseClient && !currentUser) {
+    if (supabaseClient && !await ensureCurrentSession()) {
       const postId = form.dataset.commentForm;
       const pendingBody = String(new FormData(form).get("body") || "");
       promptForAuth(() => {
@@ -828,7 +1021,7 @@ if (feed) {
     const newComment = {
       post_id: postId,
       user_id: currentUser?.id || null,
-      author: currentUser?.user_metadata?.full_name || currentUser?.email || "Guest",
+      author: getUserDisplayName() || "Guest",
       author_email: currentUser?.email || "",
       body: String(formData.get("body") || "").trim(),
       created_at: new Date().toISOString()
@@ -867,8 +1060,8 @@ if (feed) {
   });
 }
 
-async function incrementPostCounter(postId, field) {
-  if (supabaseClient && !currentUser) {
+async function incrementPostCounter(postId, field, options = {}) {
+  if (supabaseClient && field !== "views" && !await ensureCurrentSession()) {
     promptForAuth(() => incrementPostCounter(postId, field));
     return;
   }
@@ -886,7 +1079,7 @@ async function incrementPostCounter(postId, field) {
 
     if (error) {
       console.error(error);
-      alert("That action could not be saved. Please check your Supabase policies.");
+      if (!options.silent) alert("That action could not be saved. Please check your Supabase policies.");
       return;
     }
   }
@@ -902,10 +1095,13 @@ async function deletePostById(postId) {
   if (!confirm("Delete this post and its comments?")) return;
 
   if (supabaseClient) {
-    const { error } = await supabaseClient.from(POSTS_TABLE).delete().eq("id", postId);
+    const { error } = await withTimeout(
+      supabaseClient.from(POSTS_TABLE).delete().eq("id", postId),
+      "Delete timed out. Check the posts delete policy."
+    );
     if (error) {
       console.error(error);
-      alert("Delete failed. Only the post owner or an approved admin can delete it.");
+      alert(`Delete failed: ${error.message || "Only the post owner or an approved admin can delete it."}`);
       return;
     }
     await loadPosts();
@@ -922,10 +1118,13 @@ async function deleteCommentById(commentId) {
   if (!confirm("Delete this comment?")) return;
 
   if (supabaseClient) {
-    const { error } = await supabaseClient.from(COMMENTS_TABLE).delete().eq("id", commentId);
+    const { error } = await withTimeout(
+      supabaseClient.from(COMMENTS_TABLE).delete().eq("id", commentId),
+      "Comment delete timed out. Check the comments delete policy."
+    );
     if (error) {
       console.error(error);
-      alert("Delete failed. Only the comment owner or an approved admin can delete it.");
+      alert(`Delete failed: ${error.message || "Only the comment owner or an approved admin can delete it."}`);
       return;
     }
     await loadPosts();
@@ -935,6 +1134,203 @@ async function deleteCommentById(commentId) {
     renderPosts();
   }
 }
+
+function showPostEditor(postId) {
+  const post = posts.find((item) => String(item.id) === String(postId));
+  if (!post || !canManagePost(post)) return;
+
+  const existing = document.getElementById("editPostModal");
+  if (existing) existing.remove();
+
+  const modalHtml = `
+    <div class="modal fade" id="editPostModal" tabindex="-1" aria-labelledby="editPostModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="modal-title fs-5" id="editPostModalLabel">Edit Post</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <form id="editPostForm" data-editing-post="${post.id}">
+            <div class="modal-body">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label" for="editPostAuthor">Author</label>
+                  <input class="form-control" id="editPostAuthor" type="text" required value="${escapeHtml(post.author || "")}">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="editPostCategory">Category</label>
+                  <select class="form-select" id="editPostCategory">
+                    ${["Advocacy", "Legal Brief", "Community", "News"].map((category) => `<option ${category === post.category ? "selected" : ""}>${category}</option>`).join("")}
+                  </select>
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="editPostTitle">Title</label>
+                  <input class="form-control" id="editPostTitle" type="text" required value="${escapeHtml(post.title || "")}">
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="editPostBody">Post</label>
+                  <textarea class="form-control" id="editPostBody" rows="5" required>${escapeHtml(post.body || "")}</textarea>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="editPostImage">Replace photo</label>
+                  <input class="form-control" id="editPostImage" type="file" accept="image/*">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label" for="editPostDocument">Replace document</label>
+                  <input class="form-control" id="editPostDocument" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx">
+                </div>
+                <div class="col-12">
+                  <div id="editPostMessage" class="mt-1"></div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-torch">Save Changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("editPostModal")).show();
+}
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("#editPostForm");
+  if (!form) return;
+
+  event.preventDefault();
+  const postId = form.dataset.editingPost;
+  const post = posts.find((item) => String(item.id) === String(postId));
+  if (!post || !canManagePost(post)) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const messageDiv = document.getElementById("editPostMessage");
+  submitButton.disabled = true;
+  submitButton.textContent = "Saving...";
+  if (messageDiv) messageDiv.innerHTML = "";
+
+  try {
+    const imageFile = document.getElementById("editPostImage").files[0];
+    const documentFile = document.getElementById("editPostDocument").files[0];
+    const updates = {
+      author: document.getElementById("editPostAuthor").value.trim(),
+      category: document.getElementById("editPostCategory").value,
+      title: document.getElementById("editPostTitle").value.trim(),
+      body: document.getElementById("editPostBody").value.trim(),
+      image_url: imageFile ? await uploadFile(imageFile, "images") : post.image_url,
+      document_url: documentFile ? await uploadFile(documentFile, "documents") : post.document_url
+    };
+
+    if (supabaseClient) {
+      const { error } = await withTimeout(
+        supabaseClient.from(POSTS_TABLE).update(updates).eq("id", postId),
+        "Saving timed out. Check the posts update policy."
+      );
+      if (error) throw error;
+      await loadPosts();
+    } else {
+      posts = posts.map((item) => String(item.id) === String(postId) ? { ...item, ...updates } : item);
+      saveLocalPosts(posts);
+      renderPosts();
+    }
+
+    if (document.body.dataset.page === "studio") await loadStudio();
+    if (document.body.dataset.page === "admin") await loadAdminDashboard();
+    bootstrap.Modal.getInstance(document.getElementById("editPostModal")).hide();
+  } catch (error) {
+    console.error(error);
+    if (messageDiv) messageDiv.innerHTML = `<div class="alert alert-danger">Save failed: ${error.message || "Please check Supabase policies."}</div>`;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Save Changes";
+  }
+});
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("#profileSettingsForm");
+  if (!form) return;
+
+  event.preventDefault();
+  if (!await ensureCurrentSession()) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const messageDiv = document.getElementById("profileSettingsMessage");
+  submitButton.disabled = true;
+  submitButton.textContent = "Saving...";
+  if (messageDiv) messageDiv.innerHTML = "";
+
+  try {
+    const fullName = document.getElementById("profileNameInput").value.trim();
+    const avatarFile = document.getElementById("profileAvatarInput").files[0];
+    const avatarUrl = avatarFile ? await uploadFile(avatarFile, "avatars") : currentUser.user_metadata?.avatar_url || "";
+
+    const { data, error } = await withTimeout(
+      supabaseClient.auth.updateUser({
+        data: {
+          full_name: fullName,
+          name: fullName,
+          avatar_url: avatarUrl
+        }
+      }),
+      "Profile update timed out. Please try again."
+    );
+    if (error) throw error;
+
+    currentUser = data.user || currentUser;
+    await syncSignedInUser();
+    await refreshAuthenticatedViews();
+    if (messageDiv) messageDiv.innerHTML = '<div class="alert alert-success">Profile updated.</div>';
+  } catch (error) {
+    console.error(error);
+    if (messageDiv) messageDiv.innerHTML = `<div class="alert alert-danger">Profile could not be saved: ${error.message || "Please try again."}</div>`;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Save Profile";
+  }
+});
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("#profilePasswordForm");
+  if (!form) return;
+
+  event.preventDefault();
+  if (!await ensureCurrentSession()) return;
+
+  const password = document.getElementById("profileNewPassword").value;
+  const confirmPassword = document.getElementById("profileConfirmPassword").value;
+  const submitButton = form.querySelector('button[type="submit"]');
+  const messageDiv = document.getElementById("profilePasswordMessage");
+
+  if (password !== confirmPassword) {
+    if (messageDiv) messageDiv.innerHTML = '<div class="alert alert-danger">Passwords do not match.</div>';
+    return;
+  }
+
+  submitButton.disabled = true;
+  submitButton.textContent = "Updating...";
+  if (messageDiv) messageDiv.innerHTML = "";
+
+  try {
+    const { error } = await withTimeout(
+      supabaseClient.auth.updateUser({ password }),
+      "Password update timed out. Please try again."
+    );
+    if (error) throw error;
+
+    form.reset();
+    if (messageDiv) messageDiv.innerHTML = '<div class="alert alert-success">Password updated for your account.</div>';
+  } catch (error) {
+    console.error(error);
+    if (messageDiv) messageDiv.innerHTML = `<div class="alert alert-danger">Password could not be updated: ${error.message || "Please try again."}</div>`;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Update Password";
+  }
+});
 
 async function requestAdminAccess() {
   if (!currentUser) {
@@ -966,16 +1362,17 @@ async function loadStudio() {
   const stats = document.getElementById("studioStats");
   const myPosts = document.getElementById("studioPosts");
   const requestStatus = document.getElementById("adminRequestStatus");
+  const signedInUser = await ensureCurrentSession();
   if (!gate || !content || !stats || !myPosts) return;
 
-  if (!supabaseClient || !currentUser) {
+  if (!supabaseClient || !signedInUser) {
     gate.innerHTML = `
       <div class="dashboard-card">
-        <h2>Sign in to view your studio</h2>
-        <p>Create an account or log in to see your posts, engagement, and admin access status.</p>
+        <h2>Sign in to view your dashboard</h2>
+        <p>Log in to see your posts, engagement, profile, and admin access status.</p>
         <div class="btn-group" role="group">
-          <button class="btn btn-torch" type="button" data-auth-action="signup">Sign Up</button>
-          <button class="btn btn-outline-dark" type="button" data-auth-action="login">Log In</button>
+          <button class="btn btn-torch" type="button" data-auth-action="login">Log In</button>
+          <button class="btn btn-outline-dark" type="button" data-auth-action="signup">Sign Up</button>
         </div>
       </div>
     `;
@@ -998,10 +1395,44 @@ async function loadStudio() {
   stats.innerHTML = renderStatCards(totals);
   myPosts.innerHTML = renderDashboardRows(myPostList, { ownerView: false });
 
-  if (requestStatus) await renderAdminRequestStatus(requestStatus);
+  if (requestStatus) {
+    requestStatus.innerHTML = renderProfileSettings();
+    await renderAdminRequestStatus(requestStatus, { append: true });
+  }
 }
 
-async function renderAdminRequestStatus(container) {
+function renderProfileSettings() {
+  const avatarUrl = currentUser?.user_metadata?.avatar_url || "";
+  return `
+    <div class="dashboard-card">
+      <h3>Profile</h3>
+      <form id="profileSettingsForm" class="compact-form">
+        <div class="profile-edit-preview">
+          ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="">` : `<span>${escapeHtml(getInitials(getUserDisplayName()))}</span>`}
+        </div>
+        <label class="form-label" for="profileNameInput">Username</label>
+        <input class="form-control" id="profileNameInput" type="text" value="${escapeHtml(getUserDisplayName())}" required>
+        <label class="form-label mt-2" for="profileAvatarInput">Profile picture</label>
+        <input class="form-control" id="profileAvatarInput" type="file" accept="image/*">
+        <button class="btn btn-torch w-100 mt-3" type="submit">Save Profile</button>
+        <div id="profileSettingsMessage" class="mt-3"></div>
+      </form>
+    </div>
+    <div class="dashboard-card mt-4">
+      <h3>Change Password</h3>
+      <form id="profilePasswordForm" class="compact-form">
+        <label class="form-label" for="profileNewPassword">New password</label>
+        <input class="form-control" id="profileNewPassword" type="password" minlength="6" required>
+        <label class="form-label mt-2" for="profileConfirmPassword">Confirm new password</label>
+        <input class="form-control" id="profileConfirmPassword" type="password" minlength="6" required>
+        <button class="btn btn-outline-dark w-100 mt-3" type="submit">Update Password</button>
+        <div id="profilePasswordMessage" class="mt-3"></div>
+      </form>
+    </div>
+  `;
+}
+
+async function renderAdminRequestStatus(container, options = {}) {
   const { data } = await supabaseClient
     .from(ADMIN_REQUESTS_TABLE)
     .select("*")
@@ -1009,23 +1440,31 @@ async function renderAdminRequestStatus(container) {
     .order("created_at", { ascending: false });
 
   const latest = data?.[0];
+  const render = (html) => {
+    if (options.append) {
+      container.insertAdjacentHTML("beforeend", html);
+      return;
+    }
+    container.innerHTML = html;
+  };
+
   if (isApprovedAdmin()) {
-    container.innerHTML = '<div class="dashboard-card"><h3>Admin Access</h3><p>Your admin access is approved!</p><a class="btn btn-torch" href="admin.html">Open Admin Dashboard</a></div>';
+    render('<div class="dashboard-card mt-4"><h3>Admin Access</h3><p>Your admin access is approved!</p><a class="btn btn-torch" href="admin.html">Open Admin Dashboard</a></div>');
     return;
   }
 
   if (latest?.status === "pending") {
-    container.innerHTML = '<div class="dashboard-card"><h3>Admin Access</h3><p>Your request is pending owner approval.</p></div>';
+    render('<div class="dashboard-card mt-4"><h3>Admin Access</h3><p>Your request is pending owner approval.</p></div>');
     return;
   }
 
-  container.innerHTML = `
-    <div class="dashboard-card">
+  render(`
+    <div class="dashboard-card mt-4">
       <h3>Request Admin Access</h3>
       <p>Need to help manage official Torch Africa content? Request owner approval.</p>
       <button class="btn btn-outline-dark" type="button" id="requestAdminButton">Request Admin Access</button>
     </div>
-  `;
+  `);
   document.getElementById("requestAdminButton")?.addEventListener("click", requestAdminAccess);
 }
 
@@ -1056,7 +1495,7 @@ async function loadAdminDashboard() {
   if (!isApprovedAdmin()) {
     gate.innerHTML = `
       <div class="dashboard-card alert-danger">
-        <h2>🔒 Admin Access Denied</h2>
+        <h2>Admin Access Denied</h2>
         <p>${escapeHtml(currentUser.email)} is not an approved admin.</p>
         ${isOwner() ? '' : '<p class="text-muted mt-2">Contact the owner to request admin access.</p>'}
       </div>
@@ -1099,16 +1538,24 @@ async function renderAdminRequests(container) {
     .eq("status", "pending")
     .order("created_at", { ascending: true });
 
-  if (error || !data?.length) {
-    container.innerHTML = '<div class="dashboard-card"><h3>Admin Requests</h3><p>No pending requests.</p></div>';
-    return;
-  }
+  const pendingRequests = error ? [] : (data || []);
 
   container.innerHTML = `
     <div class="dashboard-card">
-      <h3>👥 Admin Access Requests</h3>
-      <div class="request-list">
-        ${data.map((request) => `
+      <h3>Add Admin</h3>
+      <form id="addAdminForm" class="compact-form">
+        <label class="form-label" for="adminEmailInput">Email</label>
+        <input class="form-control" id="adminEmailInput" type="email" placeholder="admin@example.com" required>
+        <label class="form-label mt-2" for="adminNameInput">Name</label>
+        <input class="form-control" id="adminNameInput" type="text" placeholder="Full name">
+        <button class="btn btn-torch w-100 mt-3" type="submit">Add Admin</button>
+        <div id="addAdminMessage" class="mt-3"></div>
+      </form>
+    </div>
+    <div class="dashboard-card mt-4">
+      <h3>Admin Access Requests</h3>
+      ${pendingRequests.length ? '<div class="request-list">' : '<p>No pending requests.</p><div class="request-list d-none">'}
+        ${pendingRequests.map((request) => `
           <div class="request-item">
             <div>
               <strong>${escapeHtml(request.full_name || request.email)}</strong>
@@ -1125,6 +1572,47 @@ async function renderAdminRequests(container) {
   `;
 }
 
+document.addEventListener("submit", async (event) => {
+  const form = event.target.closest("#addAdminForm");
+  if (!form) return;
+
+  event.preventDefault();
+  if (!isOwner()) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const messageDiv = document.getElementById("addAdminMessage");
+  const email = document.getElementById("adminEmailInput").value.trim().toLowerCase();
+  const fullName = document.getElementById("adminNameInput").value.trim();
+
+  submitButton.disabled = true;
+  submitButton.textContent = "Adding...";
+  if (messageDiv) messageDiv.innerHTML = "";
+
+  try {
+    const { error } = await withTimeout(
+      supabaseClient.from(ADMINS_TABLE).upsert({
+        email,
+        full_name: fullName || email,
+        role: "admin",
+        status: "approved",
+        approved_by: currentUser.email,
+        approved_at: new Date().toISOString()
+      }),
+      "Adding admin timed out. Check the admins table owner policy."
+    );
+    if (error) throw error;
+
+    form.reset();
+    if (messageDiv) messageDiv.innerHTML = '<div class="alert alert-success">Admin added. They can log in and open the admin dashboard.</div>';
+  } catch (error) {
+    console.error(error);
+    if (messageDiv) messageDiv.innerHTML = `<div class="alert alert-danger">Admin could not be added: ${error.message || "Check Supabase policies."}</div>`;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Add Admin";
+  }
+});
+
 document.addEventListener("click", async (event) => {
   const approveId = event.target.closest("[data-approve-admin]")?.dataset.approveAdmin;
   if (approveId) {
@@ -1133,13 +1621,23 @@ document.addEventListener("click", async (event) => {
   }
 
   const rejectId = event.target.closest("[data-reject-admin]")?.dataset.rejectAdmin;
-  if (rejectId) await decideAdminRequest(rejectId, "rejected");
+  if (rejectId) {
+    await decideAdminRequest(rejectId, "rejected");
+    return;
+  }
+
+  const dashboardEdit = event.target.closest("[data-dashboard-edit]")?.dataset.dashboardEdit;
+  if (dashboardEdit) {
+    showPostEditor(dashboardEdit);
+    return;
+  }
 
   const dashboardDelete = event.target.closest("[data-dashboard-delete]")?.dataset.dashboardDelete;
   if (dashboardDelete) {
     await deletePostById(dashboardDelete);
     if (document.body.dataset.page === "admin") await loadAdminDashboard();
     if (document.body.dataset.page === "studio") await loadStudio();
+    return;
   }
 });
 
@@ -1232,7 +1730,10 @@ function renderDashboardRows(postList, options) {
           <span>${Number(post.views || 0)}</span>
           <span>${Number(post.likes || 0)}</span>
           <span>${(post.comments || []).length}</span>
-          <span><button class="icon-action danger-link" type="button" data-dashboard-delete="${post.id}">Delete</button></span>
+          <span class="dashboard-actions">
+            <button class="icon-action" type="button" data-dashboard-edit="${post.id}">Edit</button>
+            <button class="icon-action danger-link" type="button" data-dashboard-delete="${post.id}">Delete</button>
+          </span>
         </div>
       `).join("")}
     </div>
@@ -1254,6 +1755,9 @@ function escapeHtml(value) {
 
 initSupabase();
 initAuth().then(async () => {
+  if (hasPasswordResetIntent() && !passwordResetModalOpen) {
+    await showPasswordResetModal(currentUser?.email || "", { recoveryLinkMode: Boolean(currentUser) });
+  }
   if (feed) await loadPosts();
   if (document.body.dataset.page === "studio") await loadStudio();
   if (document.body.dataset.page === "admin") await loadAdminDashboard();

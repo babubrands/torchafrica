@@ -36,9 +36,36 @@ const SUPABASE_ANON_KEY = "your-anon-key";
 
 Enable **Authentication > Providers > Email** in Supabase. For the lowest-friction community flow, turn off email confirmation in **Authentication > Providers > Email > Confirm email** so new members are signed in immediately after creating an account. If you leave confirmation on, Supabase will require the user to confirm their email before the first login.
 
+If existing users cannot log back in, check **Authentication > Users** in Supabase. Users with an unconfirmed email cannot sign in while confirmation is required. Either confirm those users manually or turn off **Confirm email** for the email provider.
+
 Supabase stores the session in the browser by default, and this site also enables persistent sessions, so members stay signed in on the same device for future visits until they sign out.
 
-For password resets, the login dialog includes a **Forgot password?** flow. In Supabase, keep the recovery email template configured to send the recovery OTP/token so members can paste it into the reset dialog, set a new password, and return to login.
+For password resets, the login dialog includes a **Forgot password?** flow. In Supabase, configure **Authentication > Email Templates > Reset Password** to send the six-digit recovery token and point the button back to the reset dialog. Use this template:
+
+```html
+<h2>Reset your password</h2>
+<p>We received a request to reset your Torch Africa password.</p>
+<p>Your 6-digit reset OTP is:</p>
+<p style="font-size: 28px; font-weight: 700; letter-spacing: 6px;">{{ .Token }}</p>
+<p>Enter this code in the reset password dialog, then choose a new password.</p>
+<p>
+  <a href="{{ .RedirectTo }}" style="display: inline-block; padding: 12px 18px; background: #111827; color: #ffffff; text-decoration: none; border-radius: 6px;">
+    Open reset dialog
+  </a>
+</p>
+<p>If the button does not open, copy this link into your browser:</p>
+<p>{{ .RedirectTo }}</p>
+<p>If you did not request this, you can safely ignore this email.</p>
+```
+
+The app sends Supabase a reset redirect URL with `?reset-password=1`, so the email button opens the password reset dialog. Supabase creates and stores the OTP; the frontend verifies it with `verifyOtp({ type: "recovery" })` before updating the password.
+
+In **Authentication > URL Configuration**, set:
+
+- **Site URL:** `https://torchafrica.vercel.app`
+- **Redirect URLs:** `https://torchafrica.vercel.app/*`
+
+The reset link should open `https://torchafrica.vercel.app/?reset-password=1`. Do not use `http://localhost:3000` in production reset emails.
 
 Then run this setup in **SQL Editor**. It creates profiles, member posts, comments, owner/admin approval, secure delete rules, and safe like/repost counters.
 
@@ -155,11 +182,11 @@ security definer
 set search_path = public
 as $$
 begin
-  if auth.uid() is null then
+  if counter_name = 'views' then
+    update public.posts set views = views + 1 where id = post_id;
+  elsif auth.uid() is null then
     raise exception 'Authentication required';
-  end if;
-
-  if counter_name = 'likes' then
+  elsif counter_name = 'likes' then
     update public.posts set likes = likes + 1 where id = post_id;
   elsif counter_name = 'reposts' then
     update public.posts set reposts = reposts + 1 where id = post_id;
@@ -170,6 +197,7 @@ end;
 $$;
 
 grant execute on function public.increment_post_counter(uuid, text) to authenticated;
+grant execute on function public.increment_post_counter(uuid, text) to anon;
 
 alter table public.profiles enable row level security;
 alter table public.admins enable row level security;
@@ -192,6 +220,7 @@ drop policy if exists "Owners and admins can delete posts" on public.posts;
 drop policy if exists "Anyone can read comments" on public.comments;
 drop policy if exists "Members can create comments" on public.comments;
 drop policy if exists "Owners and admins can delete comments" on public.comments;
+drop policy if exists "Users and admins can delete comments" on public.comments;
 
 create policy "Profiles are readable"
 on public.profiles for select
@@ -253,12 +282,21 @@ create policy "Members can create comments"
 on public.comments for insert
 with check (auth.uid() = user_id);
 
-create policy "Owners and admins can delete comments"
+create policy "Users and admins can delete comments"
 on public.comments for delete
-using (auth.uid() = user_id or public.is_approved_admin());
+using (
+  auth.uid() = user_id
+  or public.is_approved_admin()
+  or exists (
+    select 1
+    from public.posts
+    where posts.id = comments.post_id
+      and posts.user_id = auth.uid()
+  )
+);
 ```
 
-Create a public storage bucket named `post-uploads`, then add these storage policies. The frontend uploads files under `images/<user-id>/...` and `documents/<user-id>/...`, so authenticated members need insert access to this bucket.
+Create a public storage bucket named `post-uploads`, then add these storage policies. The frontend uploads files under `images/<user-id>/...`, `documents/<user-id>/...`, and `avatars/<user-id>/...`, so authenticated members need insert access to this bucket.
 
 ```sql
 insert into storage.buckets (id, name, public)

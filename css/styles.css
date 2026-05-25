@@ -133,6 +133,71 @@ body {
   padding: .25rem .55rem;
 }
 
+.profile-menu {
+  margin-left: .35rem;
+}
+
+.profile-button {
+  align-items: center;
+  background: var(--torch-ink);
+  border: 2px solid var(--torch-gold);
+  border-radius: 50%;
+  color: var(--torch-white);
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.profile-button span {
+  font-size: .82rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.profile-button img {
+  border-radius: 50%;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.profile-dropdown {
+  border: 1px solid var(--torch-line);
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(15, 36, 34, .14);
+  min-width: 240px;
+  padding: .4rem;
+}
+
+.profile-summary {
+  border-bottom: 1px solid var(--torch-line);
+  display: grid;
+  gap: .1rem;
+  margin-bottom: .35rem;
+  padding: .65rem .75rem .75rem;
+}
+
+.profile-summary strong,
+.profile-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-summary span {
+  color: var(--torch-muted);
+  font-size: .84rem;
+}
+
+.profile-summary em {
+  color: var(--torch-red);
+  font-size: .78rem;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .btn {
   border-radius: 6px;
   font-weight: 700;
@@ -758,7 +823,7 @@ h3 {
   border-bottom: 1px solid var(--torch-line);
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(260px, 1fr) 90px 90px 110px 110px;
+  grid-template-columns: minmax(260px, 1fr) 90px 90px 110px 150px;
   padding: .9rem 0;
 }
 
@@ -806,6 +871,12 @@ h3 {
   padding: 1rem 0;
 }
 
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+}
+
 .request-list {
   display: grid;
   gap: .85rem;
@@ -829,6 +900,32 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: .5rem;
+}
+
+.compact-form {
+  display: grid;
+  gap: .15rem;
+}
+
+.profile-edit-preview {
+  align-items: center;
+  background: var(--torch-soft);
+  border: 1px solid var(--torch-line);
+  border-radius: 50%;
+  color: var(--torch-red);
+  display: inline-flex;
+  font-weight: 900;
+  height: 74px;
+  justify-content: center;
+  margin-bottom: .75rem;
+  overflow: hidden;
+  width: 74px;
+}
+
+.profile-edit-preview img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
 }
 
 @media (max-width: 991.98px) {
