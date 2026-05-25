@@ -342,14 +342,115 @@ h3 {
 }
 
 .side-panel {
-  padding: 1.5rem;
+  overflow: hidden;
+  padding: 0;
   position: sticky;
   top: 98px;
 }
 
-.publish-list li {
-  border-top: 1px solid var(--torch-line);
-  padding: .85rem 0;
+.trend-header {
+  background: var(--torch-ink);
+  color: var(--torch-white);
+  padding: 1.35rem 1.5rem;
+}
+
+.trend-header .eyebrow {
+  margin-bottom: .4rem;
+}
+
+.trend-header h3 {
+  font-size: 1.55rem;
+  margin-bottom: 0;
+}
+
+.featured-trend {
+  background: linear-gradient(135deg, rgba(168, 25, 33, .96), rgba(235, 165, 51, .9));
+  color: var(--torch-white);
+  padding: 1.5rem;
+}
+
+.featured-trend h4 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 800;
+  margin: .65rem 0;
+}
+
+.featured-trend p {
+  color: rgba(255, 255, 255, .84);
+  margin-bottom: 1rem;
+}
+
+.trend-label {
+  background: rgba(255, 255, 255, .18);
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: .78rem;
+  font-weight: 800;
+  padding: .25rem .65rem;
+  text-transform: uppercase;
+}
+
+.trend-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.trend-stats span {
+  background: rgba(255, 255, 255, .16);
+  border-radius: 6px;
+  font-size: .85rem;
+  font-weight: 800;
+  padding: .35rem .55rem;
+}
+
+.trend-list {
+  display: grid;
+}
+
+.trend-item {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--torch-line);
+  color: var(--torch-ink);
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: auto 1fr;
+  padding: 1rem 1.5rem;
+  text-decoration: none;
+}
+
+.trend-item:hover,
+.trend-item:focus {
+  background: var(--torch-soft);
+  color: var(--torch-red);
+}
+
+.trend-item span {
+  color: var(--torch-gold);
+  font-weight: 900;
+}
+
+.trend-item strong {
+  line-height: 1.35;
+}
+
+.topic-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.topic-cloud span {
+  background: var(--torch-soft);
+  border: 1px solid var(--torch-line);
+  border-radius: 999px;
+  color: var(--torch-muted);
+  font-size: .85rem;
+  font-weight: 800;
+  padding: .35rem .65rem;
 }
 
 .contact-section {
