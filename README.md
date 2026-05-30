@@ -5,8 +5,9 @@ Static GitHub Pages website built with HTML, Bootstrap CSS, and JavaScript.
 ## Files
 
 - `index.html` - landing page, program sections, memorandum download, blog feed, and post modal.
+- `gallery.html` - gallery upload/editor page with a Bootstrap carousel.
 - `css/styles.css` - custom Torch Africa styling.
-- `js/app.js` - blog/feed logic, likes, reposts, comments, local demo mode, and Supabase connection points.
+- `js/app.js` - blog/feed logic, likes, reposts, comments, gallery carousel logic, image compression, local demo mode, and Supabase connection points.
 - `assets/torch-africa-logo.jpeg` - logo image.
 - `assets/torch-africa-memorandum-constitutional-amendment-bill-2025.pdf` - downloadable memorandum.
 
@@ -140,11 +141,24 @@ create table if not exists public.comments (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.gallery_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,
+  author text not null default 'Torch Africa',
+  author_email text,
+  title text not null,
+  caption text,
+  image_url text not null,
+  created_at timestamptz not null default now()
+);
+
 alter table public.posts add column if not exists user_id uuid references auth.users(id) on delete set null;
 alter table public.posts add column if not exists author_email text;
 alter table public.posts add column if not exists views integer not null default 0;
 alter table public.comments add column if not exists user_id uuid references auth.users(id) on delete set null;
 alter table public.comments add column if not exists author_email text;
+alter table public.gallery_items add column if not exists user_id uuid references auth.users(id) on delete set null;
+alter table public.gallery_items add column if not exists author_email text;
 
 create or replace function public.is_approved_admin()
 returns boolean
@@ -204,6 +218,7 @@ alter table public.admins enable row level security;
 alter table public.admin_requests enable row level security;
 alter table public.posts enable row level security;
 alter table public.comments enable row level security;
+alter table public.gallery_items enable row level security;
 
 drop policy if exists "Profiles are readable" on public.profiles;
 drop policy if exists "Users can create own profile" on public.profiles;
@@ -221,6 +236,10 @@ drop policy if exists "Anyone can read comments" on public.comments;
 drop policy if exists "Members can create comments" on public.comments;
 drop policy if exists "Owners and admins can delete comments" on public.comments;
 drop policy if exists "Users and admins can delete comments" on public.comments;
+drop policy if exists "Anyone can read gallery items" on public.gallery_items;
+drop policy if exists "Members can create gallery items" on public.gallery_items;
+drop policy if exists "Users and admins can update gallery items" on public.gallery_items;
+drop policy if exists "Users and admins can delete gallery items" on public.gallery_items;
 
 create policy "Profiles are readable"
 on public.profiles for select
@@ -294,9 +313,26 @@ using (
       and posts.user_id = auth.uid()
   )
 );
+
+create policy "Anyone can read gallery items"
+on public.gallery_items for select
+using (true);
+
+create policy "Members can create gallery items"
+on public.gallery_items for insert
+with check (auth.uid() = user_id);
+
+create policy "Users and admins can update gallery items"
+on public.gallery_items for update
+using (auth.uid() = user_id or public.is_approved_admin())
+with check (auth.uid() = user_id or public.is_approved_admin());
+
+create policy "Users and admins can delete gallery items"
+on public.gallery_items for delete
+using (auth.uid() = user_id or public.is_approved_admin());
 ```
 
-Create a public storage bucket named `post-uploads`, then add these storage policies. The frontend uploads files under `images/<user-id>/...`, `documents/<user-id>/...`, and `avatars/<user-id>/...`, so authenticated members need insert access to this bucket.
+Create a public storage bucket named `post-uploads`, then add these storage policies. The frontend uploads files under `images/<user-id>/...`, `documents/<user-id>/...`, `avatars/<user-id>/...`, and `gallery/<user-id>/...`, so authenticated members need insert access to this bucket.
 
 ```sql
 insert into storage.buckets (id, name, public)
@@ -323,4 +359,6 @@ to authenticated
 using (bucket_id = 'post-uploads' and public.is_approved_admin());
 ```
 
-The current setup uses direct email/password sign-up and login. Members can create and delete their own posts/comments after signing in once, and the browser keeps their session for future visits until they sign out. Approved admins can moderate all content. The owner account `ebarasa203@gmail.com` can approve future admin requests.
+The current setup uses direct email/password sign-up and login. Members can create and delete their own posts/comments and gallery items after signing in once, and the browser keeps their session for future visits until they sign out. Approved admins can moderate all content. The owner account `ebarasa203@gmail.com` can approve future admin requests.
+
+Before image files are uploaded, the browser reduces them to a maximum of 1200 by 1200 pixels and saves them as compressed JPEGs. This keeps post photos, avatars, and gallery carousel uploads faster and smaller.

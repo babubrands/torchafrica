@@ -4,10 +4,14 @@ const POSTS_TABLE = "posts";
 const COMMENTS_TABLE = "comments";
 const ADMINS_TABLE = "admins";
 const ADMIN_REQUESTS_TABLE = "admin_requests";
+const GALLERY_TABLE = "gallery_items";
 const STORAGE_BUCKET = "post-uploads";
 const OWNER_EMAIL = "ebarasa203@gmail.com";
 const TORCH_ADMIN_EMAIL = "torchafrica@gmail.com";
 const APP_PUBLIC_URL = "https://torchafrica.vercel.app";
+const IMAGE_MAX_WIDTH = 1200;
+const IMAGE_MAX_HEIGHT = 1200;
+const IMAGE_QUALITY = 0.72;
 
 const demoPosts = [
   {
@@ -102,6 +106,11 @@ const postForm = document.getElementById("postForm");
 const configNotice = document.getElementById("configNotice");
 const authSlot = document.getElementById("authSlot");
 const createPostButton = document.getElementById("createPostButton");
+const galleryForm = document.getElementById("galleryForm");
+const galleryCarousel = document.getElementById("galleryCarousel");
+const galleryList = document.getElementById("galleryList");
+const galleryEmpty = document.getElementById("galleryEmpty");
+const galleryFeedback = document.getElementById("galleryFeedback");
 const year = document.getElementById("year");
 const contactForm = document.getElementById("contactForm");
 if (year) year.textContent = new Date().getFullYear();
@@ -175,6 +184,7 @@ async function initAuth() {
     if (feed) await loadPosts();
     if (document.body.dataset.page === "studio") await loadStudio();
     if (document.body.dataset.page === "admin") await loadAdminDashboard();
+    if (document.body.dataset.page === "gallery") await loadGallery();
   });
 }
 
@@ -185,6 +195,7 @@ async function refreshAuthenticatedViews() {
   if (feed) await loadPosts();
   if (document.body.dataset.page === "studio") await loadStudio();
   if (document.body.dataset.page === "admin") await loadAdminDashboard();
+  if (document.body.dataset.page === "gallery") await loadGallery();
 }
 
 function promptForAuth(nextAction) {
@@ -856,25 +867,81 @@ async function markPostViewed(postId) {
 async function uploadFile(file, folder) {
   if (!file) return "";
 
+  const uploadableFile = await prepareUploadFile(file);
+
   if (!supabaseClient) {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(uploadableFile);
     });
   }
 
-  const safeName = file.name.replace(/[^a-z0-9.\-_]/gi, "-").toLowerCase();
+  const safeName = uploadableFile.name.replace(/[^a-z0-9.\-_]/gi, "-").toLowerCase();
   const userFolder = currentUser?.id || "public";
   const path = `${folder}/${userFolder}/${Date.now()}-${safeName}`;
   const { error } = await withTimeout(
-    supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file),
+    supabaseClient.storage.from(STORAGE_BUCKET).upload(path, uploadableFile, {
+      cacheControl: "3600",
+      contentType: uploadableFile.type || file.type
+    }),
     "Upload timed out. Check the post-uploads bucket and Storage policies."
   );
   if (error) throw new Error(error.message || "Upload failed. Check the post-uploads bucket policies.");
 
   const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
   return data.publicUrl;
+}
+
+async function prepareUploadFile(file) {
+  if (!file?.type?.startsWith("image/")) return file;
+
+  try {
+    return await crunchImageFile(file);
+  } catch (error) {
+    console.error(error);
+    return file;
+  }
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("The selected image could not be loaded."));
+    };
+    image.src = url;
+  });
+}
+
+async function crunchImageFile(file) {
+  const image = await loadImageFromFile(file);
+  const scale = Math.min(1, IMAGE_MAX_WIDTH / image.naturalWidth, IMAGE_MAX_HEIGHT / image.naturalHeight);
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  canvas.width = width;
+  canvas.height = height;
+  context.drawImage(image, 0, 0, width, height);
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((nextBlob) => {
+      if (nextBlob) resolve(nextBlob);
+      else reject(new Error("Image compression failed."));
+    }, "image/jpeg", IMAGE_QUALITY);
+  });
+
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "upload";
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
 }
 
 if (createPostButton) {
@@ -1740,6 +1807,229 @@ function renderDashboardRows(postList, options) {
   `;
 }
 
+async function loadGallery() {
+  if (!galleryCarousel && !galleryList) return;
+
+  if (!supabaseClient) {
+    renderGallery([]);
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from(GALLERY_TABLE)
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    if (galleryEmpty) {
+      galleryEmpty.textContent = "Gallery could not load. Check the gallery_items table and policies.";
+      galleryEmpty.classList.remove("d-none");
+    }
+    renderGallery([]);
+    return;
+  }
+
+  renderGallery(data || []);
+}
+
+function canManageGalleryItem(item) {
+  return Boolean(currentUser && (item.user_id === currentUser.id || isApprovedAdmin()));
+}
+
+function renderGallery(items) {
+  if (galleryEmpty) {
+    galleryEmpty.textContent = items.length ? "" : "No gallery items yet. Add the first photo below.";
+    galleryEmpty.classList.toggle("d-none", items.length > 0);
+  }
+
+  if (galleryCarousel) {
+    galleryCarousel.innerHTML = items.length ? `
+      <div class="carousel-inner">
+        ${items.map((item, index) => `
+          <div class="carousel-item ${index === 0 ? "active" : ""}">
+            <img src="${escapeHtml(item.image_url)}" class="d-block w-100" alt="${escapeHtml(item.title || "Torch Africa gallery photo")}">
+            <div class="carousel-caption">
+              <h2>${escapeHtml(item.title || "Torch Africa Gallery")}</h2>
+              <p>${escapeHtml(item.caption || "")}</p>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <button class="carousel-control-prev" type="button" data-bs-target="#galleryCarousel" data-bs-slide="prev">
+        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Previous</span>
+      </button>
+      <button class="carousel-control-next" type="button" data-bs-target="#galleryCarousel" data-bs-slide="next">
+        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Next</span>
+      </button>
+    ` : "";
+  }
+
+  if (!galleryList) return;
+
+  if (!currentUser) {
+    galleryList.innerHTML = '<div class="dashboard-empty">Log in to add, edit, or remove gallery photos.</div>';
+    return;
+  }
+
+  if (!items.length) {
+    galleryList.innerHTML = '<div class="dashboard-empty">No gallery photos found.</div>';
+    return;
+  }
+
+  galleryList.innerHTML = items.map((item) => `
+    <article class="gallery-editor-card">
+      <img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.title || "Gallery photo")}">
+      <div>
+        <strong>${escapeHtml(item.title || "Gallery photo")}</strong>
+        <p>${escapeHtml(item.caption || "")}</p>
+      </div>
+      ${canManageGalleryItem(item) ? `
+        <div class="gallery-card-actions">
+          <button class="btn btn-sm btn-outline-dark" type="button" data-edit-gallery="${item.id}">Edit</button>
+          <button class="btn btn-sm btn-outline-danger" type="button" data-delete-gallery="${item.id}">Remove</button>
+        </div>
+      ` : ""}
+    </article>
+  `).join("");
+}
+
+function resetGalleryForm() {
+  if (!galleryForm) return;
+  galleryForm.reset();
+  galleryForm.dataset.editingGallery = "";
+  const submitButton = galleryForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = "Add to Gallery";
+}
+
+async function editGalleryItem(itemId) {
+  if (!supabaseClient || !currentUser) return;
+
+  const { data, error } = await supabaseClient
+    .from(GALLERY_TABLE)
+    .select("*")
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (error || !data || !canManageGalleryItem(data)) {
+    alert("This gallery item could not be opened for editing.");
+    return;
+  }
+
+  galleryForm.dataset.editingGallery = data.id;
+  document.getElementById("galleryTitle").value = data.title || "";
+  document.getElementById("galleryCaption").value = data.caption || "";
+  const submitButton = galleryForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.textContent = "Save Gallery Item";
+  galleryForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function deleteGalleryItem(itemId) {
+  if (!supabaseClient || !currentUser) return;
+  if (!confirm("Remove this gallery photo?")) return;
+
+  const { error } = await withTimeout(
+    supabaseClient.from(GALLERY_TABLE).delete().eq("id", itemId),
+    "Gallery delete timed out. Check the gallery_items delete policy."
+  );
+
+  if (error) {
+    console.error(error);
+    alert(`Gallery item could not be removed: ${error.message || "Check Supabase policies."}`);
+    return;
+  }
+
+  await loadGallery();
+}
+
+if (galleryForm) {
+  galleryForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    if (!await ensureCurrentSession()) {
+      promptForAuth(() => galleryForm.scrollIntoView({ behavior: "smooth", block: "start" }));
+      return;
+    }
+
+    const submitButton = galleryForm.querySelector('button[type="submit"]');
+    const editingId = galleryForm.dataset.editingGallery;
+    const files = Array.from(document.getElementById("galleryImage").files || []);
+    const title = document.getElementById("galleryTitle").value.trim();
+    const caption = document.getElementById("galleryCaption").value.trim();
+
+    if (!editingId && !files.length) {
+      alert("Choose at least one image for the gallery.");
+      return;
+    }
+
+    submitButton.disabled = true;
+    submitButton.textContent = editingId ? "Saving..." : "Crunching photos...";
+    if (galleryFeedback) galleryFeedback.textContent = files.length > 1 ? `Preparing ${files.length} photos...` : "Preparing photo...";
+
+    try {
+      if (editingId) {
+        const updates = { title, caption };
+        if (files[0]) updates.image_url = await uploadFile(files[0], "gallery");
+
+        const { error } = await withTimeout(
+          supabaseClient.from(GALLERY_TABLE).update(updates).eq("id", editingId),
+          "Saving gallery item timed out. Check the gallery_items update policy."
+        );
+        if (error) throw error;
+        if (galleryFeedback) galleryFeedback.textContent = "Gallery item saved.";
+      } else {
+        const rows = [];
+        for (let index = 0; index < files.length; index += 1) {
+          const imageUrl = await uploadFile(files[index], "gallery");
+          rows.push({
+            user_id: currentUser.id,
+            author: getUserDisplayName() || currentUser.email || "Torch Africa",
+            author_email: currentUser.email || "",
+            title: files.length > 1 ? `${title} ${index + 1}` : title,
+            caption,
+            image_url: imageUrl,
+            created_at: new Date().toISOString()
+          });
+        }
+
+        const { error } = await withTimeout(
+          supabaseClient.from(GALLERY_TABLE).insert(rows),
+          "Adding gallery photos timed out. Check the gallery_items insert policy."
+        );
+        if (error) throw error;
+        if (galleryFeedback) galleryFeedback.textContent = "Photos added to the carousel.";
+      }
+
+      resetGalleryForm();
+      await loadGallery();
+    } catch (error) {
+      console.error(error);
+      if (galleryFeedback) galleryFeedback.textContent = "";
+      alert(`Gallery item could not be saved: ${error.message || "Check Supabase settings."}`);
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = galleryForm.dataset.editingGallery ? "Save Gallery Item" : "Add to Gallery";
+    }
+  });
+}
+
+document.addEventListener("click", async (event) => {
+  const editGallery = event.target.closest("[data-edit-gallery]");
+  if (editGallery) {
+    event.preventDefault();
+    await editGalleryItem(editGallery.dataset.editGallery);
+    return;
+  }
+
+  const deleteGallery = event.target.closest("[data-delete-gallery]");
+  if (deleteGallery) {
+    event.preventDefault();
+    await deleteGalleryItem(deleteGallery.dataset.deleteGallery);
+  }
+});
+
 function formatDate(value) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(value));
 }
@@ -1761,4 +2051,5 @@ initAuth().then(async () => {
   if (feed) await loadPosts();
   if (document.body.dataset.page === "studio") await loadStudio();
   if (document.body.dataset.page === "admin") await loadAdminDashboard();
+  if (document.body.dataset.page === "gallery") await loadGallery();
 });
