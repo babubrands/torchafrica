@@ -116,6 +116,7 @@ const galleryPreviewStrip = document.getElementById("galleryPreviewStrip");
 const galleryAddTile = document.getElementById("galleryAddTile");
 const year = document.getElementById("year");
 const contactForm = document.getElementById("contactForm");
+const trendingPanel = document.getElementById("trendingPanel");
 if (year) year.textContent = new Date().getFullYear();
 let selectedGalleryFiles = [];
 
@@ -738,6 +739,7 @@ async function loadPosts() {
   }
 
   renderPosts();
+  renderTrendingPosts();
 }
 
 function normalizePosts(nextPosts) {
@@ -823,6 +825,63 @@ function renderPosts() {
     `;
   }).join("");
   observePostViews();
+}
+
+function isFeaturedPost(post) {
+  if (!post.is_featured) return false;
+  if (!post.featured_until) return true;
+  return new Date(post.featured_until) > new Date();
+}
+
+function getTrendScore(post) {
+  return Number(post.views || 0)
+    + Number(post.likes || 0) * 3
+    + Number(post.comments?.length || 0) * 4
+    + Number(post.reposts || 0) * 5;
+}
+
+function getTrendingPosts() {
+  const featured = posts
+    .filter(isFeaturedPost)
+    .sort((a, b) => Number(a.featured_rank || 999) - Number(b.featured_rank || 999));
+  const featuredIds = new Set(featured.map((post) => String(post.id)));
+  const automatic = posts
+    .filter((post) => !featuredIds.has(String(post.id)))
+    .sort((a, b) => getTrendScore(b) - getTrendScore(a));
+
+  return [...featured, ...automatic].slice(0, 4);
+}
+
+function renderTrendingPosts() {
+  if (!trendingPanel) return;
+
+  const trendPosts = getTrendingPosts();
+  if (!trendPosts.length) {
+    trendingPanel.innerHTML = '<div class="trend-empty">Trending posts will appear here as the community engages.</div>';
+    return;
+  }
+
+  const [lead, ...rest] = trendPosts;
+  trendingPanel.innerHTML = `
+    <article class="featured-trend">
+      <span class="trend-label">${isFeaturedPost(lead) ? "Featured" : "Trending"}</span>
+      <h4>${escapeHtml(lead.title)}</h4>
+      <p>${escapeHtml(String(lead.body || "").slice(0, 150))}${String(lead.body || "").length > 150 ? "..." : ""}</p>
+      <div class="trend-stats">
+        <span>${Number(lead.likes || 0)} likes</span>
+        <span>${Number(lead.comments?.length || 0)} comments</span>
+        <span>${Number(lead.views || 0)} views</span>
+      </div>
+    </article>
+    <div class="trend-list">
+      ${rest.map((post, index) => `
+        <a href="#blog" class="trend-item" data-jump-post="${post.id}">
+          <span>${String(index + 1).padStart(2, "0")}</span>
+          <strong>${escapeHtml(post.title)}</strong>
+        </a>
+      `).join("")}
+    </div>
+  `;
 }
 
 function clearPostViewObserver() {
@@ -1064,6 +1123,16 @@ if (feed) {
     if (!button) return;
 
     await incrementPostCounter(button.dataset.likeId, "likes");
+  });
+
+  trendingPanel?.addEventListener("click", (event) => {
+    const jumpPost = event.target.closest("[data-jump-post]");
+    if (!jumpPost) return;
+
+    event.preventDefault();
+    const safeId = CSS.escape(jumpPost.dataset.jumpPost);
+    const postElement = document.querySelector(`[data-post-id="${safeId}"]`);
+    postElement?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   feed.addEventListener("submit", async (event) => {
@@ -1710,7 +1779,42 @@ document.addEventListener("click", async (event) => {
     if (document.body.dataset.page === "studio") await loadStudio();
     return;
   }
+
+  const dashboardFeature = event.target.closest("[data-dashboard-feature]")?.dataset.dashboardFeature;
+  if (dashboardFeature) {
+    await toggleFeaturedPost(dashboardFeature);
+    return;
+  }
 });
+
+async function toggleFeaturedPost(postId) {
+  if (!supabaseClient || !isApprovedAdmin()) return;
+
+  const post = posts.find((item) => String(item.id) === String(postId));
+  if (!post) return;
+
+  const nextFeaturedState = !isFeaturedPost(post);
+  const { error } = await withTimeout(
+    supabaseClient
+      .from(POSTS_TABLE)
+      .update({
+        is_featured: nextFeaturedState,
+        featured_rank: nextFeaturedState ? 1 : null,
+        featured_until: null
+      })
+      .eq("id", postId),
+    "Feature update timed out. Check the posts update policy and featured columns."
+  );
+
+  if (error) {
+    console.error(error);
+    alert(`Could not update featured status: ${error.message || "Check Supabase settings."}`);
+    return;
+  }
+
+  await loadAdminDashboard();
+  if (feed) await loadPosts();
+}
 
 async function decideAdminRequest(requestId, status) {
   if (!isOwner()) return;
@@ -1780,6 +1884,8 @@ function renderDashboardRows(postList, options) {
     return '<div class="dashboard-empty">No posts found.</div>';
   }
 
+  const adminView = Boolean(options.ownerView);
+
   return `
     <div class="dashboard-table">
       <div class="dashboard-row dashboard-head">
@@ -1802,6 +1908,7 @@ function renderDashboardRows(postList, options) {
           <span>${Number(post.likes || 0)}</span>
           <span>${(post.comments || []).length}</span>
           <span class="dashboard-actions">
+            ${adminView ? `<button class="icon-action" type="button" data-dashboard-feature="${post.id}">${isFeaturedPost(post) ? "Unfeature" : "Feature"}</button>` : ""}
             <button class="icon-action" type="button" data-dashboard-edit="${post.id}">Edit</button>
             <button class="icon-action danger-link" type="button" data-dashboard-delete="${post.id}">Delete</button>
           </span>

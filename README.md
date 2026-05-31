@@ -4,10 +4,10 @@ Static GitHub Pages website built with HTML, Bootstrap CSS, and JavaScript.
 
 ## Files
 
-- `index.html` - landing page, program sections, memorandum download, blog feed, and post modal.
+- `index.html` - landing page, program sections, memorandum download, dynamic trending sidebar, blog feed, and post modal.
 - `gallery.html` - gallery upload/editor page with a Bootstrap carousel.
 - `css/styles.css` - custom Torch Africa styling.
-- `js/app.js` - blog/feed logic, likes, reposts, comments, gallery carousel logic, image compression, local demo mode, and Supabase connection points.
+- `js/app.js` - blog/feed logic, dynamic trending, featured post controls, likes, reposts, comments, gallery carousel logic, image compression, local demo mode, and Supabase connection points.
 - `assets/torch-africa-logo.jpeg` - logo image.
 - `assets/torch-africa-memorandum-constitutional-amendment-bill-2025.pdf` - downloadable memorandum.
 
@@ -155,6 +155,9 @@ create table if not exists public.gallery_items (
 alter table public.posts add column if not exists user_id uuid references auth.users(id) on delete set null;
 alter table public.posts add column if not exists author_email text;
 alter table public.posts add column if not exists views integer not null default 0;
+alter table public.posts add column if not exists is_featured boolean not null default false;
+alter table public.posts add column if not exists featured_rank integer;
+alter table public.posts add column if not exists featured_until timestamptz;
 alter table public.comments add column if not exists user_id uuid references auth.users(id) on delete set null;
 alter table public.comments add column if not exists author_email text;
 alter table public.gallery_items add column if not exists user_id uuid references auth.users(id) on delete set null;

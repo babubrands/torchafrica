@@ -592,6 +592,12 @@ h3 {
   display: grid;
 }
 
+.trend-empty {
+  color: var(--torch-muted);
+  font-weight: 800;
+  padding: 1.25rem 1.5rem;
+}
+
 .trend-item {
   align-items: flex-start;
   border-bottom: 1px solid var(--torch-line);
