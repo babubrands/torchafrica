@@ -53,7 +53,7 @@
 
           <div id="galleryCarousel" class="carousel slide gallery-carousel" data-bs-ride="carousel"></div>
 
-          <div class="row g-4 mt-4">
+          <div class="row g-4 mt-4 d-none" id="galleryManager">
             <div class="col-lg-5">
               <div class="gallery-manager">
                 <h2>Add or edit photo</h2>
@@ -65,7 +65,10 @@
                   <textarea class="form-control" id="galleryCaption" rows="4" placeholder="Short caption" required></textarea>
 
                   <label class="form-label mt-3" for="galleryImage">Photos</label>
-                  <input class="form-control" id="galleryImage" type="file" accept="image/*" multiple>
+                  <input class="visually-hidden" id="galleryImage" type="file" accept="image/*" multiple>
+                  <div class="gallery-preview-strip" id="galleryPreviewStrip" aria-live="polite">
+                    <button class="gallery-add-tile" type="button" id="galleryAddTile" aria-label="Add photos">+</button>
+                  </div>
                   <p class="upload-note">Select one or many photos. Images are reduced before saving so the carousel loads faster.</p>
 
                   <button class="btn btn-torch w-100 mt-3" type="submit">Add to Gallery</button>

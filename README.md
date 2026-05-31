@@ -240,6 +240,9 @@ drop policy if exists "Anyone can read gallery items" on public.gallery_items;
 drop policy if exists "Members can create gallery items" on public.gallery_items;
 drop policy if exists "Users and admins can update gallery items" on public.gallery_items;
 drop policy if exists "Users and admins can delete gallery items" on public.gallery_items;
+drop policy if exists "Approved admins can create gallery items" on public.gallery_items;
+drop policy if exists "Approved admins can update gallery items" on public.gallery_items;
+drop policy if exists "Approved admins can delete gallery items" on public.gallery_items;
 
 create policy "Profiles are readable"
 on public.profiles for select
@@ -318,18 +321,18 @@ create policy "Anyone can read gallery items"
 on public.gallery_items for select
 using (true);
 
-create policy "Members can create gallery items"
+create policy "Approved admins can create gallery items"
 on public.gallery_items for insert
-with check (auth.uid() = user_id);
+with check (auth.uid() = user_id and public.is_approved_admin());
 
-create policy "Users and admins can update gallery items"
+create policy "Approved admins can update gallery items"
 on public.gallery_items for update
-using (auth.uid() = user_id or public.is_approved_admin())
-with check (auth.uid() = user_id or public.is_approved_admin());
+using (public.is_approved_admin())
+with check (public.is_approved_admin());
 
-create policy "Users and admins can delete gallery items"
+create policy "Approved admins can delete gallery items"
 on public.gallery_items for delete
-using (auth.uid() = user_id or public.is_approved_admin());
+using (public.is_approved_admin());
 ```
 
 Create a public storage bucket named `post-uploads`, then add these storage policies. The frontend uploads files under `images/<user-id>/...`, `documents/<user-id>/...`, `avatars/<user-id>/...`, and `gallery/<user-id>/...`, so authenticated members need insert access to this bucket.

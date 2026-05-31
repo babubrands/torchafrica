@@ -110,10 +110,14 @@ const galleryForm = document.getElementById("galleryForm");
 const galleryCarousel = document.getElementById("galleryCarousel");
 const galleryList = document.getElementById("galleryList");
 const galleryEmpty = document.getElementById("galleryEmpty");
+const galleryManager = document.getElementById("galleryManager");
 const galleryFeedback = document.getElementById("galleryFeedback");
+const galleryPreviewStrip = document.getElementById("galleryPreviewStrip");
+const galleryAddTile = document.getElementById("galleryAddTile");
 const year = document.getElementById("year");
 const contactForm = document.getElementById("contactForm");
 if (year) year.textContent = new Date().getFullYear();
+let selectedGalleryFiles = [];
 
 if (contactForm) {
   contactForm.addEventListener("submit", (event) => {
@@ -1834,10 +1838,13 @@ async function loadGallery() {
 }
 
 function canManageGalleryItem(item) {
-  return Boolean(currentUser && (item.user_id === currentUser.id || isApprovedAdmin()));
+  return Boolean(currentUser && isApprovedAdmin());
 }
 
 function renderGallery(items) {
+  const canManageGallery = isApprovedAdmin();
+  if (galleryManager) galleryManager.classList.toggle("d-none", !canManageGallery);
+
   if (galleryEmpty) {
     galleryEmpty.textContent = items.length ? "" : "No gallery items yet. Add the first photo below.";
     galleryEmpty.classList.toggle("d-none", items.length > 0);
@@ -1869,8 +1876,8 @@ function renderGallery(items) {
 
   if (!galleryList) return;
 
-  if (!currentUser) {
-    galleryList.innerHTML = '<div class="dashboard-empty">Log in to add, edit, or remove gallery photos.</div>';
+  if (!canManageGallery) {
+    galleryList.innerHTML = "";
     return;
   }
 
@@ -1900,12 +1907,39 @@ function resetGalleryForm() {
   if (!galleryForm) return;
   galleryForm.reset();
   galleryForm.dataset.editingGallery = "";
+  selectedGalleryFiles = [];
+  renderGalleryPreview();
   const submitButton = galleryForm.querySelector('button[type="submit"]');
   if (submitButton) submitButton.textContent = "Add to Gallery";
 }
 
+function renderGalleryPreview() {
+  if (!galleryPreviewStrip) return;
+
+  galleryPreviewStrip.querySelectorAll(".gallery-preview-tile").forEach((tile) => tile.remove());
+  selectedGalleryFiles.forEach((file, index) => {
+    const tile = document.createElement("div");
+    tile.className = "gallery-preview-tile";
+
+    const image = document.createElement("img");
+    image.alt = file.name || `Selected photo ${index + 1}`;
+    image.src = URL.createObjectURL(file);
+    image.onload = () => URL.revokeObjectURL(image.src);
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "gallery-preview-remove";
+    removeButton.setAttribute("aria-label", `Remove ${file.name || "photo"}`);
+    removeButton.dataset.removePreview = String(index);
+    removeButton.textContent = "x";
+
+    tile.append(image, removeButton);
+    galleryPreviewStrip.insertBefore(tile, galleryAddTile);
+  });
+}
+
 async function editGalleryItem(itemId) {
-  if (!supabaseClient || !currentUser) return;
+  if (!supabaseClient || !currentUser || !isApprovedAdmin()) return;
 
   const { data, error } = await supabaseClient
     .from(GALLERY_TABLE)
@@ -1921,13 +1955,15 @@ async function editGalleryItem(itemId) {
   galleryForm.dataset.editingGallery = data.id;
   document.getElementById("galleryTitle").value = data.title || "";
   document.getElementById("galleryCaption").value = data.caption || "";
+  selectedGalleryFiles = [];
+  renderGalleryPreview();
   const submitButton = galleryForm.querySelector('button[type="submit"]');
   if (submitButton) submitButton.textContent = "Save Gallery Item";
   galleryForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function deleteGalleryItem(itemId) {
-  if (!supabaseClient || !currentUser) return;
+  if (!supabaseClient || !currentUser || !isApprovedAdmin()) return;
   if (!confirm("Remove this gallery photo?")) return;
 
   const { error } = await withTimeout(
@@ -1945,6 +1981,17 @@ async function deleteGalleryItem(itemId) {
 }
 
 if (galleryForm) {
+  galleryAddTile?.addEventListener("click", () => {
+    document.getElementById("galleryImage")?.click();
+  });
+
+  document.getElementById("galleryImage")?.addEventListener("change", (event) => {
+    const nextFiles = Array.from(event.target.files || []);
+    selectedGalleryFiles = [...selectedGalleryFiles, ...nextFiles];
+    event.target.value = "";
+    renderGalleryPreview();
+  });
+
   galleryForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
@@ -1952,10 +1999,14 @@ if (galleryForm) {
       promptForAuth(() => galleryForm.scrollIntoView({ behavior: "smooth", block: "start" }));
       return;
     }
+    if (!isApprovedAdmin()) {
+      alert("Only approved admins can manage gallery photos.");
+      return;
+    }
 
     const submitButton = galleryForm.querySelector('button[type="submit"]');
     const editingId = galleryForm.dataset.editingGallery;
-    const files = Array.from(document.getElementById("galleryImage").files || []);
+    const files = selectedGalleryFiles;
     const title = document.getElementById("galleryTitle").value.trim();
     const caption = document.getElementById("galleryCaption").value.trim();
 
@@ -2016,6 +2067,14 @@ if (galleryForm) {
 }
 
 document.addEventListener("click", async (event) => {
+  const removePreview = event.target.closest("[data-remove-preview]");
+  if (removePreview) {
+    event.preventDefault();
+    selectedGalleryFiles.splice(Number(removePreview.dataset.removePreview), 1);
+    renderGalleryPreview();
+    return;
+  }
+
   const editGallery = event.target.closest("[data-edit-gallery]");
   if (editGallery) {
     event.preventDefault();
