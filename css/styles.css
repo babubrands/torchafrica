@@ -909,6 +909,29 @@ h3 {
   gap: .85rem;
 }
 
+.cms-form textarea {
+  resize: vertical;
+}
+
+.cms-list {
+  display: grid;
+  gap: .8rem;
+}
+
+.cms-list-item {
+  align-items: start;
+  border: 1px solid var(--torch-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr auto;
+  padding: .85rem;
+}
+
+.cms-list-item p {
+  margin: .25rem 0 0;
+}
+
 .request-item {
   border: 1px solid var(--torch-line);
   border-radius: 8px;

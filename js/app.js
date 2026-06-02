@@ -5,6 +5,8 @@ const COMMENTS_TABLE = "comments";
 const ADMINS_TABLE = "admins";
 const ADMIN_REQUESTS_TABLE = "admin_requests";
 const GALLERY_TABLE = "gallery_items";
+const SITE_SETTINGS_TABLE = "site_settings";
+const PROGRAMS_TABLE = "programs";
 const STORAGE_BUCKET = "post-uploads";
 const OWNER_EMAIL = "ebarasa203@gmail.com";
 const TORCH_ADMIN_EMAIL = "torchafrica@gmail.com";
@@ -117,6 +119,12 @@ const galleryAddTile = document.getElementById("galleryAddTile");
 const year = document.getElementById("year");
 const contactForm = document.getElementById("contactForm");
 const trendingPanel = document.getElementById("trendingPanel");
+const programCards = document.getElementById("programCards");
+const siteSettingsForm = document.getElementById("siteSettingsForm");
+const contactSettingsForm = document.getElementById("contactSettingsForm");
+const programForm = document.getElementById("programForm");
+const programList = document.getElementById("programList");
+const clearProgramButton = document.getElementById("clearProgramButton");
 if (year) year.textContent = new Date().getFullYear();
 let selectedGalleryFiles = [];
 
@@ -140,8 +148,9 @@ if (contactForm) {
     ].join("\n");
 
     const encodedMessage = encodeURIComponent(whatsappMessage);
-    const webUrl = `https://wa.me/254733296064?text=${encodedMessage}`;
-    const appUrl = `whatsapp://send?phone=254733296064&text=${encodedMessage}`;
+    const phone = siteSettings.whatsapp_phone || defaultSiteSettings.whatsapp_phone;
+    const webUrl = `https://wa.me/${phone}?text=${encodedMessage}`;
+    const appUrl = `whatsapp://send?phone=${phone}&text=${encodedMessage}`;
     const feedback = document.getElementById("contactFeedback");
 
     window.location.href = appUrl;
@@ -187,6 +196,7 @@ async function initAuth() {
     await loadAdminStatus();
     renderAuthSlot();
     if (feed) await loadPosts();
+    if (document.body.dataset.page !== "admin" && document.body.dataset.page !== "gallery") await loadSiteContent();
     if (document.body.dataset.page === "studio") await loadStudio();
     if (document.body.dataset.page === "admin") await loadAdminDashboard();
     if (document.body.dataset.page === "gallery") await loadGallery();
@@ -198,6 +208,7 @@ async function refreshAuthenticatedViews() {
   await loadAdminStatus();
   renderAuthSlot();
   if (feed) await loadPosts();
+  if (document.body.dataset.page !== "admin" && document.body.dataset.page !== "gallery") await loadSiteContent();
   if (document.body.dataset.page === "studio") await loadStudio();
   if (document.body.dataset.page === "admin") await loadAdminDashboard();
   if (document.body.dataset.page === "gallery") await loadGallery();
@@ -287,12 +298,11 @@ function isOwner() {
 }
 
 function canManagePost(post) {
-  return Boolean(currentUser && (post.user_id === currentUser.id || isApprovedAdmin()));
+  return Boolean(currentUser && isApprovedAdmin());
 }
 
 function canManageComment(comment) {
-  const parentPost = posts.find((post) => String(post.id) === String(comment.post_id));
-  return Boolean(currentUser && (comment.user_id === currentUser.id || parentPost?.user_id === currentUser.id || isApprovedAdmin()));
+  return Boolean(currentUser && isApprovedAdmin());
 }
 
 function renderAuthSlot() {
@@ -327,7 +337,6 @@ function renderAuthSlot() {
           <span>${escapeHtml(currentUser.email)}</span>
           ${isOwner() ? '<em>Owner</em>' : isApprovedAdmin() ? '<em>Admin</em>' : '<em>Member</em>'}
         </div>
-        <a class="dropdown-item" href="studio.html">My Dashboard</a>
         ${isApprovedAdmin() ? '<a class="dropdown-item" href="admin.html">Admin Dashboard</a>' : ''}
         <button class="dropdown-item" type="button" data-auth-action="signout">Sign out</button>
       </div>
@@ -764,24 +773,6 @@ function renderPosts() {
     const documentLink = post.document_url
       ? `<a class="document-link" href="${escapeHtml(post.document_url)}" target="_blank" rel="noopener">Open attached document</a>`
       : "<span></span>";
-    const comments = post.comments || [];
-    const deleteButton = canManagePost(post)
-      ? `<button class="danger-link" type="button" data-delete-post="${post.id}">Delete</button>`
-      : "";
-    const editButton = canManagePost(post)
-      ? `<button class="icon-action" type="button" data-edit-post="${post.id}">Edit</button>`
-      : "";
-    const commentList = comments.length
-      ? comments.map((comment) => `
-          <div class="comment-item">
-            <div class="comment-row">
-              <strong>${escapeHtml(comment.author || "Guest")}</strong>
-              ${canManageComment(comment) ? `<button class="danger-link" type="button" data-delete-comment="${comment.id}">Delete</button>` : ""}
-            </div>
-            <p>${escapeHtml(comment.body)}</p>
-          </div>
-        `).join("")
-      : '<p class="comment-empty">No comments yet. Start the conversation.</p>';
 
     return `
       <article class="post-card" data-post-id="${post.id}">
@@ -796,30 +787,8 @@ function renderPosts() {
           <p>${escapeHtml(post.body)}</p>
         </div>
         <div class="post-actions">
-          <div class="engagement-actions">
-            <button class="engagement-btn" type="button" data-like-id="${post.id}">
-              <span aria-hidden="true">Like</span>
-              <span>${Number(post.likes || 0)}</span>
-            </button>
-            <button class="engagement-btn" type="button" data-repost-id="${post.id}">
-              <span aria-hidden="true">Repost</span>
-              <span>${Number(post.reposts || 0)}</span>
-            </button>
-            <button class="engagement-btn" type="button" data-comment-toggle="${post.id}">
-              <span aria-hidden="true">Comment</span>
-              <span>${comments.length}</span>
-            </button>
-            ${editButton}
-            ${deleteButton}
-          </div>
+          <span class="post-read-time">${Number(post.views || 0)} views</span>
           ${documentLink}
-        </div>
-        <div class="comments-panel" id="comments-${post.id}">
-          <div class="comment-list">${commentList}</div>
-          <form class="comment-form" data-comment-form="${post.id}">
-            <textarea class="form-control form-control-sm" name="body" rows="2" placeholder="Write a comment..." required></textarea>
-            <button class="btn btn-sm btn-torch" type="submit">Post Comment</button>
-          </form>
         </div>
       </article>
     `;
@@ -882,6 +851,105 @@ function renderTrendingPosts() {
       `).join("")}
     </div>
   `;
+}
+
+const defaultSiteSettings = {
+  hero_copy: "Defending constitutionalism, civic participation, and justice-centered governance through advocacy, legal analysis, and community action.",
+  about_title: "Advocacy with a justice-first lens.",
+  about_body: "Torch Africa is a civil justice platform focused on human rights, constitutional accountability, and public-interest advocacy. The organization brings together legal insight, civic education, documentation, and public engagement to support communities and institutions working toward a fairer society.",
+  memo_title: "Memorandum on the Constitutional Amendment Bill, 2025",
+  memo_body: "Access Torch Africa's memorandum as a downloadable PDF. This section can be updated with future legal briefs, public statements, and advocacy documents.",
+  memo_url: "assets/torch-africa-memorandum-constitutional-amendment-bill-2025.pdf",
+  contact_title: "Partner with Torch Africa on advocacy, documentation, and civic education.",
+  contact_body: "Share partnership ideas, civic education requests, documentation leads, or community advocacy opportunities directly with the Torch Africa team.",
+  contact_email: "torchafrica@gmail.com",
+  contact_phone: "+254 720 369 518",
+  contact_phone_href: "+254720369518",
+  contact_location: "Bungoma",
+  whatsapp_phone: "254733296064"
+};
+
+const defaultPrograms = [
+  { icon: "HR", title: "Human Rights Monitoring", body: "Documenting emerging rights issues and amplifying community experiences with care and accuracy.", display_order: 1 },
+  { icon: "CJ", title: "Civil Justice Advocacy", body: "Supporting fair processes, access to justice, and institutional accountability in public decision-making.", display_order: 2 },
+  { icon: "CA", title: "Constitutional Analysis", body: "Preparing citizen-friendly briefs and memoranda on constitutional and legislative developments.", display_order: 3 },
+  { icon: "CE", title: "Civic Engagement", body: "Creating spaces for people to learn, contribute, organize, and participate in public affairs.", display_order: 4 }
+];
+
+let siteSettings = { ...defaultSiteSettings };
+
+async function loadSiteContent() {
+  if (!programCards && !document.getElementById("aboutTitle") && !siteSettingsForm && !contactSettingsForm) return;
+
+  let settings = { ...defaultSiteSettings };
+  let programs = defaultPrograms;
+
+  if (supabaseClient) {
+    const { data: settingsData, error: settingsError } = await supabaseClient
+      .from(SITE_SETTINGS_TABLE)
+      .select("key,value");
+    if (!settingsError && settingsData) {
+      settingsData.forEach((item) => {
+        settings[item.key] = item.value;
+      });
+    }
+
+    const { data: programsData, error: programsError } = await supabaseClient
+      .from(PROGRAMS_TABLE)
+      .select("*")
+      .eq("is_active", true)
+      .order("display_order", { ascending: true });
+    if (!programsError && programsData?.length) programs = programsData;
+  }
+
+  siteSettings = settings;
+  renderSiteContent(settings, programs);
+}
+
+function setTextById(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
+}
+
+function renderSiteContent(settings, programs) {
+  setTextById("heroCopy", settings.hero_copy);
+  setTextById("aboutTitle", settings.about_title);
+  setTextById("aboutBody", settings.about_body);
+  setTextById("memoTitle", settings.memo_title);
+  setTextById("memoBody", settings.memo_body);
+  setTextById("contactTitle", settings.contact_title);
+  setTextById("contactBody", settings.contact_body);
+  setTextById("footerLocation", `Location: ${settings.contact_location}`);
+
+  const memoLink = document.getElementById("memoLink");
+  const heroMemoLink = document.getElementById("heroMemoLink");
+  [memoLink, heroMemoLink].forEach((link) => {
+    if (link) link.href = settings.memo_url || defaultSiteSettings.memo_url;
+  });
+
+  const footerEmail = document.getElementById("footerEmail");
+  if (footerEmail) {
+    footerEmail.textContent = settings.contact_email;
+    footerEmail.href = `mailto:${settings.contact_email}`;
+  }
+
+  const footerPhone = document.getElementById("footerPhone");
+  if (footerPhone) {
+    footerPhone.textContent = settings.contact_phone;
+    footerPhone.href = `tel:${settings.contact_phone_href || settings.contact_phone}`;
+  }
+
+  if (programCards) {
+    programCards.innerHTML = programs.map((program) => `
+      <div class="col-md-6 col-xl-3">
+        <article class="work-card">
+          <div class="icon-circle">${escapeHtml(program.icon || "TA")}</div>
+          <h3>${escapeHtml(program.title)}</h3>
+          <p>${escapeHtml(program.body)}</p>
+        </article>
+      </div>
+    `).join("");
+  }
 }
 
 function clearPostViewObserver() {
@@ -1016,6 +1084,10 @@ if (createPostButton) {
       promptForAuth(() => bootstrap.Modal.getOrCreateInstance(document.getElementById("postModal")).show());
       return;
     }
+    if (supabaseClient && !isApprovedAdmin()) {
+      alert("Only approved admins can publish posts.");
+      return;
+    }
 
     preparePostFormDefaults();
     bootstrap.Modal.getOrCreateInstance(document.getElementById("postModal")).show();
@@ -1028,6 +1100,10 @@ if (postForm) {
 
     if (supabaseClient && !await ensureCurrentSession()) {
       promptForAuth(() => bootstrap.Modal.getOrCreateInstance(document.getElementById("postModal")).show());
+      return;
+    }
+    if (supabaseClient && !isApprovedAdmin()) {
+      alert("Only approved admins can publish posts.");
       return;
     }
 
@@ -1664,6 +1740,7 @@ async function loadAdminDashboard() {
   search?.addEventListener("input", render);
 
   if (requestsList) await renderAdminRequests(requestsList);
+  await loadAdminCms();
 }
 
 async function renderAdminRequests(container) {
@@ -1713,6 +1790,68 @@ async function renderAdminRequests(container) {
 }
 
 document.addEventListener("submit", async (event) => {
+  const siteForm = event.target.closest("#siteSettingsForm");
+  if (siteForm) {
+    event.preventDefault();
+    await saveSettings({
+      hero_copy: document.getElementById("settingHeroCopy").value.trim(),
+      about_title: document.getElementById("settingAboutTitle").value.trim(),
+      about_body: document.getElementById("settingAboutBody").value.trim(),
+      memo_title: document.getElementById("settingMemoTitle").value.trim(),
+      memo_body: document.getElementById("settingMemoBody").value.trim(),
+      memo_url: document.getElementById("settingMemoUrl").value.trim()
+    }, "siteSettingsMessage");
+    return;
+  }
+
+  const contactFormSettings = event.target.closest("#contactSettingsForm");
+  if (contactFormSettings) {
+    event.preventDefault();
+    await saveSettings({
+      contact_title: document.getElementById("settingContactTitle").value.trim(),
+      contact_body: document.getElementById("settingContactBody").value.trim(),
+      contact_email: document.getElementById("settingContactEmail").value.trim(),
+      contact_phone: document.getElementById("settingContactPhone").value.trim(),
+      contact_phone_href: document.getElementById("settingContactPhoneHref").value.trim(),
+      whatsapp_phone: document.getElementById("settingWhatsappPhone").value.trim(),
+      contact_location: document.getElementById("settingContactLocation").value.trim()
+    }, "contactSettingsMessage");
+    return;
+  }
+
+  const programSettingsForm = event.target.closest("#programForm");
+  if (programSettingsForm) {
+    event.preventDefault();
+    if (!supabaseClient || !isApprovedAdmin()) return;
+
+    const id = document.getElementById("programId").value;
+    const payload = {
+      icon: document.getElementById("programIcon").value.trim(),
+      title: document.getElementById("programTitle").value.trim(),
+      body: document.getElementById("programBody").value.trim(),
+      display_order: Number(document.getElementById("programOrder").value || 1),
+      is_active: true
+    };
+    const messageDiv = document.getElementById("programMessage");
+    if (messageDiv) messageDiv.innerHTML = "";
+
+    const query = id
+      ? supabaseClient.from(PROGRAMS_TABLE).update(payload).eq("id", id)
+      : supabaseClient.from(PROGRAMS_TABLE).insert(payload);
+    const { error } = await withTimeout(query, "Saving program timed out. Check the programs table policies.");
+    if (error) {
+      console.error(error);
+      if (messageDiv) messageDiv.innerHTML = `<div class="alert alert-danger">Could not save program: ${error.message || "Check Supabase policies."}</div>`;
+      return;
+    }
+
+    if (messageDiv) messageDiv.innerHTML = '<div class="alert alert-success">Program saved.</div>';
+    resetProgramForm();
+    await loadAdminPrograms();
+    await loadSiteContent();
+    return;
+  }
+
   const form = event.target.closest("#addAdminForm");
   if (!form) return;
 
@@ -1754,6 +1893,43 @@ document.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const clearProgram = event.target.closest("#clearProgramButton");
+  if (clearProgram) {
+    event.preventDefault();
+    resetProgramForm();
+    return;
+  }
+
+  const editProgramId = event.target.closest("[data-edit-program]")?.dataset.editProgram;
+  if (editProgramId) {
+    event.preventDefault();
+    if (!supabaseClient || !isApprovedAdmin()) return;
+    const { data, error } = await supabaseClient.from(PROGRAMS_TABLE).select("*").eq("id", editProgramId).maybeSingle();
+    if (error || !data) return;
+    document.getElementById("programId").value = data.id;
+    document.getElementById("programIcon").value = data.icon || "";
+    document.getElementById("programTitle").value = data.title || "";
+    document.getElementById("programBody").value = data.body || "";
+    document.getElementById("programOrder").value = data.display_order || 1;
+    programForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  const deleteProgramId = event.target.closest("[data-delete-program]")?.dataset.deleteProgram;
+  if (deleteProgramId) {
+    event.preventDefault();
+    if (!supabaseClient || !isApprovedAdmin() || !confirm("Remove this program card?")) return;
+    const { error } = await supabaseClient.from(PROGRAMS_TABLE).delete().eq("id", deleteProgramId);
+    if (error) {
+      console.error(error);
+      alert(`Program could not be removed: ${error.message || "Check Supabase policies."}`);
+      return;
+    }
+    await loadAdminPrograms();
+    await loadSiteContent();
+    return;
+  }
+
   const approveId = event.target.closest("[data-approve-admin]")?.dataset.approveAdmin;
   if (approveId) {
     await decideAdminRequest(approveId, "approved");
@@ -1916,6 +2092,94 @@ function renderDashboardRows(postList, options) {
       `).join("")}
     </div>
   `;
+}
+
+async function loadAdminCms() {
+  if (!isApprovedAdmin()) return;
+
+  await loadSiteContent();
+  populateSettingsForms(siteSettings);
+  await loadAdminPrograms();
+}
+
+function populateSettingsForms(settings) {
+  const pairs = {
+    settingHeroCopy: "hero_copy",
+    settingAboutTitle: "about_title",
+    settingAboutBody: "about_body",
+    settingMemoTitle: "memo_title",
+    settingMemoBody: "memo_body",
+    settingMemoUrl: "memo_url",
+    settingContactTitle: "contact_title",
+    settingContactBody: "contact_body",
+    settingContactEmail: "contact_email",
+    settingContactPhone: "contact_phone",
+    settingContactPhoneHref: "contact_phone_href",
+    settingWhatsappPhone: "whatsapp_phone",
+    settingContactLocation: "contact_location"
+  };
+
+  Object.entries(pairs).forEach(([inputId, key]) => {
+    const input = document.getElementById(inputId);
+    if (input) input.value = settings[key] || "";
+  });
+}
+
+async function saveSettings(updates, messageId) {
+  if (!supabaseClient || !isApprovedAdmin()) return;
+
+  const rows = Object.entries(updates).map(([key, value]) => ({ key, value }));
+  const messageDiv = document.getElementById(messageId);
+  if (messageDiv) messageDiv.innerHTML = "";
+
+  const { error } = await withTimeout(
+    supabaseClient.from(SITE_SETTINGS_TABLE).upsert(rows, { onConflict: "key" }),
+    "Saving site settings timed out. Check the site_settings table policies."
+  );
+
+  if (error) {
+    console.error(error);
+    if (messageDiv) messageDiv.innerHTML = `<div class="alert alert-danger">Could not save: ${error.message || "Check Supabase policies."}</div>`;
+    return;
+  }
+
+  if (messageDiv) messageDiv.innerHTML = '<div class="alert alert-success">Saved.</div>';
+  await loadSiteContent();
+}
+
+async function loadAdminPrograms() {
+  if (!programList || !supabaseClient) return;
+
+  const { data, error } = await supabaseClient
+    .from(PROGRAMS_TABLE)
+    .select("*")
+    .order("display_order", { ascending: true });
+
+  if (error) {
+    console.error(error);
+    programList.innerHTML = '<div class="dashboard-empty">Programs could not load. Check the programs table and policies.</div>';
+    return;
+  }
+
+  programList.innerHTML = (data || []).map((program) => `
+    <div class="cms-list-item">
+      <div>
+        <strong>${escapeHtml(program.icon || "TA")} - ${escapeHtml(program.title)}</strong>
+        <p>${escapeHtml(program.body || "")}</p>
+      </div>
+      <div class="gallery-card-actions">
+        <button class="btn btn-sm btn-outline-dark" type="button" data-edit-program="${program.id}">Edit</button>
+        <button class="btn btn-sm btn-outline-danger" type="button" data-delete-program="${program.id}">Remove</button>
+      </div>
+    </div>
+  `).join("") || '<div class="dashboard-empty">No program cards yet.</div>';
+}
+
+function resetProgramForm() {
+  if (!programForm) return;
+  programForm.reset();
+  document.getElementById("programId").value = "";
+  document.getElementById("programOrder").value = "1";
 }
 
 async function loadGallery() {
@@ -2214,6 +2478,7 @@ initAuth().then(async () => {
   if (hasPasswordResetIntent() && !passwordResetModalOpen) {
     await showPasswordResetModal(currentUser?.email || "", { recoveryLinkMode: Boolean(currentUser) });
   }
+  if (document.body.dataset.page !== "admin" && document.body.dataset.page !== "gallery") await loadSiteContent();
   if (feed) await loadPosts();
   if (document.body.dataset.page === "studio") await loadStudio();
   if (document.body.dataset.page === "admin") await loadAdminDashboard();
