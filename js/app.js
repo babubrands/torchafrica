@@ -1328,6 +1328,37 @@ async function deletePostById(postId) {
   }
 }
 
+function isMissingRpcFunction(error) {
+  const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return message.includes("function") && (message.includes("schema cache") || message.includes("not find") || message.includes("does not exist"));
+}
+
+async function updatePostInSupabase(postId, updates) {
+  const rpcParams = {
+    p_post_id: postId,
+    p_author: updates.author,
+    p_category: updates.category,
+    p_title: updates.title,
+    p_body: updates.body,
+    p_image_url: updates.image_url || null,
+    p_document_url: updates.document_url || null
+  };
+
+  const { error: rpcError } = await withTimeout(
+    supabaseClient.rpc("update_admin_post", rpcParams),
+    "Saving timed out. Run the latest Supabase SQL setup, then try again."
+  );
+
+  if (!rpcError) return;
+  if (!isMissingRpcFunction(rpcError)) throw rpcError;
+
+  const { error } = await withTimeout(
+    supabaseClient.from(POSTS_TABLE).update(updates).eq("id", postId),
+    "Saving timed out. Run the latest Supabase SQL setup, then try again."
+  );
+  if (error) throw error;
+}
+
 async function deleteCommentById(commentId) {
   const comment = posts.flatMap((post) => post.comments || []).find((item) => String(item.id) === String(commentId));
   if (!comment || !canManageComment(comment)) return;
@@ -1442,11 +1473,7 @@ document.addEventListener("submit", async (event) => {
     };
 
     if (supabaseClient) {
-      const { error } = await withTimeout(
-        supabaseClient.from(POSTS_TABLE).update(updates).eq("id", postId),
-        "Saving timed out. Check the posts update policy."
-      );
-      if (error) throw error;
+      await updatePostInSupabase(postId, updates);
       await loadPosts();
     } else {
       posts = posts.map((item) => String(item.id) === String(postId) ? { ...item, ...updates } : item);
