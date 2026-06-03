@@ -1009,13 +1009,17 @@ h3 {
 }
 
 .gallery-carousel .carousel-item {
-  aspect-ratio: 16 / 8;
-  min-height: 360px;
+  background: var(--torch-ink);
+  min-height: 0;
 }
 
 .gallery-carousel img {
-  height: 100%;
-  object-fit: cover;
+  aspect-ratio: 16 / 8;
+  background: var(--torch-ink);
+  height: auto;
+  max-height: 72vh;
+  object-fit: contain;
+  width: 100%;
 }
 
 .gallery-carousel .carousel-caption {
@@ -1188,14 +1192,43 @@ h3 {
   }
 
   .gallery-carousel .carousel-item {
+    min-height: 0;
+    padding-bottom: 0;
+  }
+
+  .gallery-carousel img {
     aspect-ratio: 4 / 3;
-    min-height: 300px;
+    max-height: none;
   }
 
   .gallery-carousel .carousel-caption {
-    bottom: 1rem;
-    left: 1rem;
-    max-width: calc(100% - 2rem);
+    background: var(--torch-ink);
+    border-radius: 0;
+    display: block !important;
+    left: 0;
+    max-width: none;
+    padding: 1rem 1.15rem 1.15rem;
+    position: static;
+    right: 0;
+    width: 100%;
+  }
+
+  .gallery-carousel .carousel-caption h2 {
+    font-size: 1.55rem;
+    line-height: 1.15;
+  }
+
+  .gallery-carousel .carousel-caption p {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .gallery-carousel .carousel-control-prev,
+  .gallery-carousel .carousel-control-next {
+    bottom: auto;
+    height: calc((100vw - 2.5rem) * .75);
+    max-height: 420px;
+    top: 0;
   }
 
   .gallery-editor-card {
