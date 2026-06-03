@@ -2379,7 +2379,7 @@ function renderDashboardRows(postList, options) {
             ${post.image_url ? `<img src="${escapeHtml(post.image_url)}" alt="">` : '<div class="post-thumb-empty"></div>'}
             <div>
               <strong>${escapeHtml(post.title)}</strong>
-              <span>${escapeHtml(options.ownerView ? `${post.author || "Unknown"} • ${post.author_email || "No email"}` : formatDate(post.created_at))}</span>
+              <span>${escapeHtml(options.ownerView ? `${post.author || "Unknown"} - ${formatDateTime(post.created_at)}` : formatDate(post.created_at))}</span>
             </div>
           </div>
           <span>${Number(post.views || 0)}</span>
@@ -2764,6 +2764,10 @@ document.addEventListener("click", async (event) => {
 
 function formatDate(value) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(value));
+}
+
+function formatDateTime(value) {
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 function escapeHtml(value) {
