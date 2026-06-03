@@ -5,7 +5,8 @@ create or replace function public.update_admin_post(
   p_title text,
   p_body text,
   p_image_url text,
-  p_document_url text
+  p_document_url text,
+  p_created_at timestamptz
 )
 returns public.posts
 language plpgsql
@@ -25,7 +26,8 @@ begin
       title = p_title,
       body = p_body,
       image_url = p_image_url,
-      document_url = p_document_url
+      document_url = p_document_url,
+      created_at = p_created_at
   where id = p_post_id
   returning * into updated_post;
 
@@ -37,4 +39,4 @@ begin
 end;
 $$;
 
-grant execute on function public.update_admin_post(uuid, text, text, text, text, text, text) to authenticated;
+grant execute on function public.update_admin_post(uuid, text, text, text, text, text, text, timestamptz) to authenticated;

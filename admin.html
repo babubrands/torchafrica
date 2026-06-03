@@ -155,7 +155,7 @@
     </footer>
 
     <div class="modal fade" id="postModal" tabindex="-1" aria-labelledby="postModalLabel" aria-hidden="true">
-      <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
           <div class="modal-header">
             <h2 class="modal-title fs-5" id="postModalLabel">Create a Blog Post</h2>
@@ -163,7 +163,9 @@
           </div>
           <form id="postForm">
             <div class="modal-body">
-              <div class="row g-3">
+              <div class="post-composer-grid">
+                <div class="post-editor-pane">
+                  <div class="row g-3">
                 <div class="col-md-6">
                   <label class="form-label" for="postAuthor">Author</label>
                   <input class="form-control" id="postAuthor" type="text" required placeholder="Your name">
@@ -182,6 +184,10 @@
                   <input class="form-control" id="postTitle" type="text" required placeholder="Post title">
                 </div>
                 <div class="col-12">
+                  <label class="form-label" for="postPublishedAt">Publish date and time</label>
+                  <input class="form-control" id="postPublishedAt" type="datetime-local">
+                </div>
+                <div class="col-12">
                   <label class="form-label" for="postBody">Post</label>
                   <textarea class="form-control" id="postBody" rows="5" required placeholder="Write the update..."></textarea>
                 </div>
@@ -193,6 +199,38 @@
                   <label class="form-label" for="postDocument">Document</label>
                   <input class="form-control" id="postDocument" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx">
                 </div>
+                <div class="col-12">
+                  <div class="cropper-panel d-none" data-cropper-panel>
+                    <div class="cropper-toolbar">
+                      <div class="preset-tabs" role="group" aria-label="Image crop preset">
+                        <button type="button" class="preset-tab active" data-crop-preset="desktop">Web</button>
+                        <button type="button" class="preset-tab" data-crop-preset="tablet">Tablet</button>
+                        <button type="button" class="preset-tab" data-crop-preset="mobile">Mobile</button>
+                      </div>
+                    </div>
+                    <canvas class="cropper-canvas" data-crop-canvas></canvas>
+                    <div class="cropper-controls">
+                      <label class="form-label">Zoom <input class="form-range" type="range" min="1" max="2.5" step="0.01" value="1" data-crop-zoom></label>
+                      <label class="form-label">Horizontal <input class="form-range" type="range" min="0" max="100" value="50" data-crop-x></label>
+                      <label class="form-label">Vertical <input class="form-range" type="range" min="0" max="100" value="50" data-crop-y></label>
+                    </div>
+                  </div>
+                </div>
+                  </div>
+                </div>
+                <aside class="post-preview-pane">
+                  <div class="preview-head">
+                    <strong>Website preview</strong>
+                    <div class="preset-tabs" role="group" aria-label="Preview device">
+                      <button type="button" class="preset-tab active" data-preview-device="desktop">Web</button>
+                      <button type="button" class="preset-tab" data-preview-device="tablet">Tablet</button>
+                      <button type="button" class="preset-tab" data-preview-device="mobile">Mobile</button>
+                    </div>
+                  </div>
+                  <div class="post-preview-device is-desktop" id="postPreviewDevice">
+                    <div id="postPreview"></div>
+                  </div>
+                </aside>
               </div>
             </div>
             <div class="modal-footer">

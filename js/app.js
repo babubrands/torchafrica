@@ -14,6 +14,12 @@ const APP_PUBLIC_URL = "https://torchafrica.vercel.app";
 const IMAGE_MAX_WIDTH = 1200;
 const IMAGE_MAX_HEIGHT = 1200;
 const IMAGE_QUALITY = 0.72;
+const POST_EXCERPT_LENGTH = 420;
+const POST_CROP_PRESETS = {
+  desktop: { label: "Web", width: 16, height: 9 },
+  tablet: { label: "Tablet", width: 4, height: 3 },
+  mobile: { label: "Mobile", width: 4, height: 5 }
+};
 
 const demoPosts = [
   {
@@ -127,6 +133,8 @@ const programList = document.getElementById("programList");
 const clearProgramButton = document.getElementById("clearProgramButton");
 if (year) year.textContent = new Date().getFullYear();
 let selectedGalleryFiles = [];
+let postCropState = createCropState();
+let postCropDrag = null;
 
 if (contactForm) {
   contactForm.addEventListener("submit", (event) => {
@@ -242,6 +250,34 @@ function preparePostFormDefaults() {
   if (authorInput && currentUser && !authorInput.value.trim()) {
     authorInput.value = getUserDisplayName();
   }
+  const publishedAtInput = document.getElementById("postPublishedAt");
+  if (publishedAtInput && !publishedAtInput.value) {
+    publishedAtInput.value = toDateTimeLocalValue(new Date());
+  }
+  updatePostPreview();
+}
+
+function toDateTimeLocalValue(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function dateTimeLocalToIso(value) {
+  const date = value ? new Date(value) : new Date();
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function createCropState(file = null) {
+  return {
+    file,
+    image: null,
+    preset: "desktop",
+    zoom: 1,
+    x: 50,
+    y: 50
+  };
 }
 
 async function finishAuthFlow(modal, messageDiv, message) {
@@ -715,11 +751,15 @@ async function signOut() {
 
 function getLocalPosts() {
   const saved = localStorage.getItem("torchAfricaPosts");
-  return saved ? JSON.parse(saved) : demoPosts;
+  return sortPostsByDate(saved ? JSON.parse(saved) : demoPosts);
 }
 
 function saveLocalPosts(nextPosts) {
-  localStorage.setItem("torchAfricaPosts", JSON.stringify(nextPosts));
+  localStorage.setItem("torchAfricaPosts", JSON.stringify(sortPostsByDate(nextPosts)));
+}
+
+function sortPostsByDate(nextPosts) {
+  return [...(nextPosts || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 async function loadPosts() {
@@ -767,33 +807,55 @@ function renderPosts() {
     return;
   }
 
-  feed.innerHTML = posts.map((post) => {
-    const date = formatDate(post.created_at);
-    const image = post.image_url ? `<img class="post-media" src="${escapeHtml(post.image_url)}" alt="${escapeHtml(post.title)}">` : "";
-    const documentLink = post.document_url
-      ? `<a class="document-link" href="${escapeHtml(post.document_url)}" target="_blank" rel="noopener">Open attached document</a>`
-      : "<span></span>";
-
-    return `
-      <article class="post-card" data-post-id="${post.id}">
-        ${image}
-        <div class="post-content">
-          <div class="post-meta">
-            <span class="post-category">${escapeHtml(post.category || "Update")}</span>
-            <span>${escapeHtml(post.author || "Torch Africa")}</span>
-            <span>${date}</span>
-          </div>
-          <h3>${escapeHtml(post.title)}</h3>
-          <p>${escapeHtml(post.body)}</p>
-        </div>
-        <div class="post-actions">
-          <span class="post-read-time">${Number(post.views || 0)} views</span>
-          ${documentLink}
-        </div>
-      </article>
-    `;
-  }).join("");
+  feed.innerHTML = posts.map((post) => renderPostCard(post)).join("");
   observePostViews();
+}
+
+function renderPostCard(post, options = {}) {
+  const postId = post.id || "preview";
+  const date = formatDate(post.created_at || new Date().toISOString());
+  const image = post.image_url ? `<img class="post-media" src="${escapeHtml(post.image_url)}" alt="${escapeHtml(post.title)}">` : "";
+  const documentLink = post.document_url
+    ? `<a class="document-link" href="${escapeHtml(post.document_url)}" target="_blank" rel="noopener">Open attached document</a>`
+    : "<span></span>";
+  const body = String(post.body || "");
+  const shouldTruncate = !options.preview && body.length > POST_EXCERPT_LENGTH;
+  const bodyHtml = shouldTruncate
+    ? `
+      <p class="post-body-preview">${escapeHtml(makePostExcerpt(body))}</p>
+      <p class="post-body-full d-none">${escapeHtml(body)}</p>
+    `
+    : `<p>${escapeHtml(body)}</p>`;
+  const readMoreButton = shouldTruncate
+    ? '<button class="read-more-button" type="button" data-read-more>Read more</button>'
+    : "";
+
+  return `
+    <article class="post-card" data-post-id="${escapeHtml(postId)}">
+      ${image}
+      <div class="post-content">
+        <div class="post-meta">
+          <span class="post-category">${escapeHtml(post.category || "Update")}</span>
+          <span>${escapeHtml(post.author || "Torch Africa")}</span>
+          <span>${date}</span>
+        </div>
+        <h3>${escapeHtml(post.title || "Post title")}</h3>
+        ${bodyHtml}
+        ${readMoreButton}
+      </div>
+      <div class="post-actions">
+        <span class="post-read-time">${Number(post.views || 0)} views</span>
+        ${documentLink}
+      </div>
+    </article>
+  `;
+}
+
+function makePostExcerpt(body) {
+  const trimmed = String(body || "").trim();
+  if (trimmed.length <= POST_EXCERPT_LENGTH) return trimmed;
+  const cutAt = trimmed.lastIndexOf(" ", POST_EXCERPT_LENGTH);
+  return `${trimmed.slice(0, cutAt > 260 ? cutAt : POST_EXCERPT_LENGTH).trim()}...`;
 }
 
 function isFeaturedPost(post) {
@@ -995,10 +1057,10 @@ async function markPostViewed(postId) {
   await incrementPostCounter(postId, "views", { silent: true });
 }
 
-async function uploadFile(file, folder) {
+async function uploadFile(file, folder, options = {}) {
   if (!file) return "";
 
-  const uploadableFile = await prepareUploadFile(file);
+  const uploadableFile = await prepareUploadFile(file, options);
 
   if (!supabaseClient) {
     return new Promise((resolve) => {
@@ -1024,11 +1086,12 @@ async function uploadFile(file, folder) {
   return data.publicUrl;
 }
 
-async function prepareUploadFile(file) {
+async function prepareUploadFile(file, options = {}) {
   if (!file?.type?.startsWith("image/")) return file;
+  if (options.skipImageCrunch) return file;
 
   try {
-    return await crunchImageFile(file);
+    return await crunchImageFile(file, options);
   } catch (error) {
     console.error(error);
     return file;
@@ -1052,17 +1115,23 @@ function loadImageFromFile(file) {
   });
 }
 
-async function crunchImageFile(file) {
-  const image = await loadImageFromFile(file);
-  const scale = Math.min(1, IMAGE_MAX_WIDTH / image.naturalWidth, IMAGE_MAX_HEIGHT / image.naturalHeight);
-  const width = Math.max(1, Math.round(image.naturalWidth * scale));
-  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+async function crunchImageFile(file, options = {}) {
+  const image = options.image || await loadImageFromFile(file);
+  const source = options.crop ? getCropSourceRect(image, options.crop) : {
+    sx: 0,
+    sy: 0,
+    sw: image.naturalWidth,
+    sh: image.naturalHeight
+  };
+  const scale = Math.min(1, IMAGE_MAX_WIDTH / source.sw, IMAGE_MAX_HEIGHT / source.sh);
+  const width = Math.max(1, Math.round(source.sw * scale));
+  const height = Math.max(1, Math.round(source.sh * scale));
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
   canvas.width = width;
   canvas.height = height;
-  context.drawImage(image, 0, 0, width, height);
+  context.drawImage(image, source.sx, source.sy, source.sw, source.sh, 0, 0, width, height);
 
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob((nextBlob) => {
@@ -1073,6 +1142,118 @@ async function crunchImageFile(file) {
 
   const baseName = file.name.replace(/\.[^.]+$/, "") || "upload";
   return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+function getCropSourceRect(image, crop) {
+  const preset = POST_CROP_PRESETS[crop.preset] || POST_CROP_PRESETS.desktop;
+  const targetRatio = preset.width / preset.height;
+  const imageRatio = image.naturalWidth / image.naturalHeight;
+  let sw = image.naturalWidth;
+  let sh = image.naturalHeight;
+
+  if (imageRatio > targetRatio) {
+    sw = image.naturalHeight * targetRatio;
+  } else {
+    sh = image.naturalWidth / targetRatio;
+  }
+
+  const zoom = Math.max(1, Number(crop.zoom || 1));
+  sw = Math.max(1, sw / zoom);
+  sh = Math.max(1, sh / zoom);
+
+  const maxX = image.naturalWidth - sw;
+  const maxY = image.naturalHeight - sh;
+  return {
+    sx: Math.max(0, Math.min(maxX, maxX * Number(crop.x || 50) / 100)),
+    sy: Math.max(0, Math.min(maxY, maxY * Number(crop.y || 50) / 100)),
+    sw,
+    sh
+  };
+}
+
+function drawCropCanvas() {
+  const canvas = document.querySelector("[data-crop-canvas]");
+  const panel = document.querySelector("[data-cropper-panel]");
+  if (!canvas || !panel) return;
+
+  panel.classList.toggle("d-none", !postCropState.image);
+  if (!postCropState.image) return;
+
+  const preset = POST_CROP_PRESETS[postCropState.preset] || POST_CROP_PRESETS.desktop;
+  const width = 640;
+  const height = Math.round(width * preset.height / preset.width);
+  const context = canvas.getContext("2d");
+  const source = getCropSourceRect(postCropState.image, postCropState);
+
+  canvas.width = width;
+  canvas.height = height;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(postCropState.image, source.sx, source.sy, source.sw, source.sh, 0, 0, width, height);
+}
+
+function syncCropInputs() {
+  const zoomInput = document.querySelector("[data-crop-zoom]");
+  const xInput = document.querySelector("[data-crop-x]");
+  const yInput = document.querySelector("[data-crop-y]");
+  if (zoomInput) zoomInput.value = String(postCropState.zoom);
+  if (xInput) xInput.value = String(postCropState.x);
+  if (yInput) yInput.value = String(postCropState.y);
+}
+
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function updateCropFromDrag(event) {
+  if (!postCropDrag || !postCropState.image) return;
+
+  const dx = event.clientX - postCropDrag.startClientX;
+  const dy = event.clientY - postCropDrag.startClientY;
+  const source = postCropDrag.source;
+  const maxX = postCropState.image.naturalWidth - source.sw;
+  const maxY = postCropState.image.naturalHeight - source.sh;
+  const nextSx = source.sx - (dx * source.sw / postCropDrag.canvasWidth);
+  const nextSy = source.sy - (dy * source.sh / postCropDrag.canvasHeight);
+
+  postCropState.x = maxX > 0 ? clampPercent(nextSx / maxX * 100) : 50;
+  postCropState.y = maxY > 0 ? clampPercent(nextSy / maxY * 100) : 50;
+  syncCropInputs();
+  drawCropCanvas();
+  updatePostPreview();
+}
+
+async function getCroppedPostImageFile() {
+  if (!postCropState.file) return null;
+  if (!postCropState.image) return postCropState.file;
+  return crunchImageFile(postCropState.file, { image: postCropState.image, crop: postCropState });
+}
+
+function setActivePresetButtons(selector, activeValue) {
+  document.querySelectorAll(selector).forEach((button) => {
+    button.classList.toggle("active", button.dataset.cropPreset === activeValue || button.dataset.previewDevice === activeValue);
+  });
+}
+
+function updatePostPreview() {
+  const preview = document.getElementById("postPreview");
+  if (!preview) return;
+
+  const imageSource = postCropState.image
+    ? document.querySelector("[data-crop-canvas]")?.toDataURL("image/jpeg", 0.86)
+    : "";
+  const previewPost = {
+    id: "preview",
+    author: document.getElementById("postAuthor")?.value.trim() || getUserDisplayName() || "Torch Africa",
+    category: document.getElementById("postCategory")?.value || "Update",
+    title: document.getElementById("postTitle")?.value.trim() || "Post title",
+    body: document.getElementById("postBody")?.value.trim() || "Write the update to preview how the website card will look.",
+    image_url: imageSource,
+    document_url: document.getElementById("postDocument")?.files?.length ? "#" : "",
+    created_at: dateTimeLocalToIso(document.getElementById("postPublishedAt")?.value),
+    views: 0
+  };
+
+  preview.innerHTML = renderPostCard(previewPost, { preview: true });
 }
 
 if (createPostButton) {
@@ -1095,6 +1276,81 @@ if (createPostButton) {
 }
 
 if (postForm) {
+  ["input", "change"].forEach((eventName) => {
+    postForm.addEventListener(eventName, (event) => {
+      if (event.target.id === "postImage") return;
+      updatePostPreview();
+    });
+  });
+
+  document.getElementById("postImage")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0] || null;
+    postCropState = createCropState(file);
+    if (file) {
+      try {
+        postCropState.image = await loadImageFromFile(file);
+      } catch (error) {
+        console.error(error);
+        alert("The selected image could not be opened for cropping.");
+      }
+    }
+    setActivePresetButtons("[data-crop-preset]", postCropState.preset);
+    drawCropCanvas();
+    updatePostPreview();
+  });
+
+  postForm.querySelectorAll("[data-crop-preset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      postCropState.preset = button.dataset.cropPreset || "desktop";
+      setActivePresetButtons("[data-crop-preset]", postCropState.preset);
+      drawCropCanvas();
+      updatePostPreview();
+    });
+  });
+
+  postForm.querySelectorAll("[data-crop-zoom], [data-crop-x], [data-crop-y]").forEach((input) => {
+    input.addEventListener("input", () => {
+      postCropState.zoom = Number(document.querySelector("[data-crop-zoom]")?.value || 1);
+      postCropState.x = Number(document.querySelector("[data-crop-x]")?.value || 50);
+      postCropState.y = Number(document.querySelector("[data-crop-y]")?.value || 50);
+      drawCropCanvas();
+      updatePostPreview();
+    });
+  });
+
+  const cropCanvas = document.querySelector("[data-crop-canvas]");
+  cropCanvas?.addEventListener("pointerdown", (event) => {
+    if (!postCropState.image) return;
+    const rect = cropCanvas.getBoundingClientRect();
+    postCropDrag = {
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      canvasWidth: rect.width,
+      canvasHeight: rect.height,
+      source: getCropSourceRect(postCropState.image, postCropState)
+    };
+    cropCanvas.classList.add("is-dragging");
+    cropCanvas.setPointerCapture?.(event.pointerId);
+  });
+
+  cropCanvas?.addEventListener("pointermove", updateCropFromDrag);
+
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
+    cropCanvas?.addEventListener(eventName, () => {
+      postCropDrag = null;
+      cropCanvas.classList.remove("is-dragging");
+    });
+  });
+
+  postForm.querySelectorAll("[data-preview-device]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const device = button.dataset.previewDevice || "desktop";
+      const previewDevice = document.getElementById("postPreviewDevice");
+      setActivePresetButtons("[data-preview-device]", device);
+      if (previewDevice) previewDevice.className = `post-preview-device is-${device}`;
+    });
+  });
+
   postForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
@@ -1112,7 +1368,8 @@ if (postForm) {
     submitButton.textContent = "Publishing...";
 
     try {
-      const imageUrl = await uploadFile(document.getElementById("postImage").files[0], "images");
+      const croppedImage = await getCroppedPostImageFile();
+      const imageUrl = await uploadFile(croppedImage, "images", { skipImageCrunch: true });
       const documentUrl = await uploadFile(document.getElementById("postDocument").files[0], "documents");
       const displayName = document.getElementById("postAuthor").value.trim()
         || getUserDisplayName()
@@ -1130,7 +1387,7 @@ if (postForm) {
         reposts: 0,
         views: 0,
         comments: [],
-        created_at: new Date().toISOString()
+        created_at: dateTimeLocalToIso(document.getElementById("postPublishedAt").value)
       };
 
       if (supabaseClient) {
@@ -1143,12 +1400,15 @@ if (postForm) {
         await loadPosts();
       } else {
         newPost.id = `local-${Date.now()}`;
-        posts = [newPost, ...posts];
+        posts = sortPostsByDate([newPost, ...posts]);
         saveLocalPosts(posts);
         renderPosts();
       }
 
       postForm.reset();
+      postCropState = createCropState();
+      drawCropCanvas();
+      updatePostPreview();
       bootstrap.Modal.getInstance(document.getElementById("postModal")).hide();
     } catch (error) {
       console.error(error);
@@ -1164,6 +1424,15 @@ document.getElementById("postModal")?.addEventListener("shown.bs.modal", prepare
 
 if (feed) {
   feed.addEventListener("click", async (event) => {
+    const readMore = event.target.closest("[data-read-more]");
+    if (readMore) {
+      const card = readMore.closest(".post-card");
+      card?.querySelector(".post-body-preview")?.classList.toggle("d-none");
+      card?.querySelector(".post-body-full")?.classList.toggle("d-none");
+      readMore.textContent = readMore.textContent === "Read more" ? "Show less" : "Read more";
+      return;
+    }
+
     const commentToggle = event.target.closest("[data-comment-toggle]");
     if (commentToggle) {
       const panel = document.getElementById(`comments-${commentToggle.dataset.commentToggle}`);
@@ -1341,7 +1610,8 @@ async function updatePostInSupabase(postId, updates) {
     p_title: updates.title,
     p_body: updates.body,
     p_image_url: updates.image_url || null,
-    p_document_url: updates.document_url || null
+    p_document_url: updates.document_url || null,
+    p_created_at: updates.created_at
   };
 
   const { error: rpcError } = await withTimeout(
@@ -1415,6 +1685,10 @@ function showPostEditor(postId) {
                   <input class="form-control" id="editPostTitle" type="text" required value="${escapeHtml(post.title || "")}">
                 </div>
                 <div class="col-12">
+                  <label class="form-label" for="editPostPublishedAt">Publish date and time</label>
+                  <input class="form-control" id="editPostPublishedAt" type="datetime-local" value="${escapeHtml(toDateTimeLocalValue(post.created_at))}">
+                </div>
+                <div class="col-12">
                   <label class="form-label" for="editPostBody">Post</label>
                   <textarea class="form-control" id="editPostBody" rows="5" required>${escapeHtml(post.body || "")}</textarea>
                 </div>
@@ -1469,14 +1743,15 @@ document.addEventListener("submit", async (event) => {
       title: document.getElementById("editPostTitle").value.trim(),
       body: document.getElementById("editPostBody").value.trim(),
       image_url: imageFile ? await uploadFile(imageFile, "images") : post.image_url,
-      document_url: documentFile ? await uploadFile(documentFile, "documents") : post.document_url
+      document_url: documentFile ? await uploadFile(documentFile, "documents") : post.document_url,
+      created_at: dateTimeLocalToIso(document.getElementById("editPostPublishedAt").value)
     };
 
     if (supabaseClient) {
       await updatePostInSupabase(postId, updates);
       await loadPosts();
     } else {
-      posts = posts.map((item) => String(item.id) === String(postId) ? { ...item, ...updates } : item);
+      posts = sortPostsByDate(posts.map((item) => String(item.id) === String(postId) ? { ...item, ...updates } : item));
       saveLocalPosts(posts);
       renderPosts();
     }
